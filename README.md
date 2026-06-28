@@ -169,9 +169,10 @@ GNSS RTK 原始 NEU 解算结果
 
 ### Layer 6 — 空间一致性批量校验【可选】
 
-利用多设备空间一致性，检测当前设备是否为空间离群点：
+利用多设备空间一致性，检测当前设备是否为空间离群点。**纯Java实现，无Python依赖**：
 
-- 收集缓存中其他设备的最近合法位移值
+- 通过独立接口 `SpatialCheckService` 暴露，实现类 `DefaultSpatialCheckService`
+- 输入：整个组内所有设备的位移数据 `List<SpatialGroupInput>`（组内设备一起传入）
 - 计算组中位数作为空间参考
 - 当前设备与组中位数偏差 > `spatialOutlierThreshold`（默认0.03m）→ 判定为空间离群
 - 离群时替换为组中位数，清除异常标记
@@ -318,20 +319,21 @@ Java主服务 → HTTP批量推送清洗后数据
 
 ### 使用方式
 
-影子评测服务通过独立的 `ShadowEvaluationClient` 调用，**不耦合在主链路中**：
+影子评测服务通过独立的 `ShadowEvaluationClient` 调用（第7层），**不耦合在主链路中**。第7层通过 `HttpShadowEvaluationService` 连接 Python AI 服务（RRCF+LSTM+Attention），第6层空间校验是纯Java：
 
 ```java
 import org.gnss.shadow.ShadowEvaluationClient;
-import org.gnss.persistence.ShadowEvaluationService;
+import org.gnss.shadow.HttpShadowEvaluationService;
 
-// 1. 创建客户端（传入你的影子评测服务实现，null则所有方法空操作）
-ShadowEvaluationService myService = new MyShadowEvalServiceImpl();
-ShadowEvaluationClient client = new ShadowEvaluationClient(myService);
+// 1. 创建 HTTP 客户端连接 Python AI 服务（第7层）
+HttpShadowEvaluationService service = new HttpShadowEvaluationService(
+    "http://localhost:8500", 3000, 5000
+);
+ShadowEvaluationClient client = new ShadowEvaluationClient(service);
 
 // 2. 方式一：主链路清洗后手动推送（5层或6层输出都行）
 CleanResult result = calculator.cleanWithHistory(data, "station-001");
 if (result.isPassed()) {
-    long epochMs = Instant.now().toEpochMilli();
     ShadowEvaluationResult shadow = client.push(result, "station-001", epochMs);
     if (shadow != null && shadow.getHaveCandidate() == 1) {
         System.out.println("候选修正: N=" + shadow.getCandidateN()
@@ -343,8 +345,6 @@ if (result.isPassed()) {
 
 // 3. 方式二：离线批量回溯历史数据
 List<CleanResult> historyResults = ...;
-List<String> stationIds = ...;
-List<Long> epochs = ...;
 List<ShadowEvaluationResult> shadows = client.pushBatch(historyResults, stationIds, epochs);
 
 // 4. 方式三：直接注入特征向量
