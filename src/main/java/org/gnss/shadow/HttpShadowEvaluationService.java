@@ -45,8 +45,9 @@ public class HttpShadowEvaluationService implements ShadowEvaluationService {
             return lastHealthResult;
         }
         lastHealthCheck = now;
+        HttpURLConnection conn = null;
         try {
-            HttpURLConnection conn = openConnection("/api/v1/health", "GET");
+            conn = openConnection("/api/v1/health", "GET");
             if (conn.getResponseCode() != 200) {
                 lastHealthResult = false;
                 return false;
@@ -56,6 +57,8 @@ public class HttpShadowEvaluationService implements ShadowEvaluationService {
             lastHealthResult = "ok".equals(status) || "degraded".equals(status);
         } catch (Exception e) {
             lastHealthResult = false;
+        } finally {
+            disconnectQuietly(conn);
         }
         return lastHealthResult;
     }
@@ -65,6 +68,7 @@ public class HttpShadowEvaluationService implements ShadowEvaluationService {
         if (features == null || features.isEmpty()) {
             return Collections.emptyList();
         }
+        HttpURLConnection conn = null;
         try {
             JSONObject body = new JSONObject();
             JSONArray arr = new JSONArray();
@@ -73,7 +77,7 @@ public class HttpShadowEvaluationService implements ShadowEvaluationService {
             }
             body.put("features", arr);
 
-            HttpURLConnection conn = openConnection("/api/v1/infer", "POST");
+            conn = openConnection("/api/v1/infer", "POST");
             conn.setRequestProperty("Content-Type", "application/json");
             conn.setDoOutput(true);
             try (OutputStream os = conn.getOutputStream()) {
@@ -97,14 +101,17 @@ public class HttpShadowEvaluationService implements ShadowEvaluationService {
             return output;
         } catch (Exception e) {
             return nullList(features.size());
+        } finally {
+            disconnectQuietly(conn);
         }
     }
 
     @Override
     public List<ShadowEvaluationResult> queryShadowResults(String stationId, int limit) {
+        HttpURLConnection conn = null;
         try {
             String path = "/api/v1/shadow/" + urlEncode(stationId) + "?limit=" + limit;
-            HttpURLConnection conn = openConnection(path, "GET");
+            conn = openConnection(path, "GET");
             if (conn.getResponseCode() != 200) {
                 return Collections.emptyList();
             }
@@ -120,35 +127,44 @@ public class HttpShadowEvaluationService implements ShadowEvaluationService {
             return output;
         } catch (Exception e) {
             return Collections.emptyList();
+        } finally {
+            disconnectQuietly(conn);
         }
     }
 
     public JSONObject getModelVersion() {
+        HttpURLConnection conn = null;
         try {
-            HttpURLConnection conn = openConnection("/api/v1/model/version", "GET");
+            conn = openConnection("/api/v1/model/version", "GET");
             if (conn.getResponseCode() == 200) {
                 return JSON.parseObject(readBody(conn));
             }
         } catch (Exception e) {
+        } finally {
+            disconnectQuietly(conn);
         }
         return new JSONObject();
     }
 
     public JSONObject getStats() {
+        HttpURLConnection conn = null;
         try {
-            HttpURLConnection conn = openConnection("/api/v1/stats", "GET");
+            conn = openConnection("/api/v1/stats", "GET");
             if (conn.getResponseCode() == 200) {
                 return JSON.parseObject(readBody(conn));
             }
         } catch (Exception e) {
+        } finally {
+            disconnectQuietly(conn);
         }
         return new JSONObject();
     }
 
     public boolean rollback(String version) {
+        HttpURLConnection conn = null;
         try {
             String path = "/api/v1/model/rollback";
-            HttpURLConnection conn = openConnection(path, "POST");
+            conn = openConnection(path, "POST");
             conn.setRequestProperty("Content-Type", "application/json");
             conn.setDoOutput(true);
             try (OutputStream os = conn.getOutputStream()) {
@@ -163,6 +179,8 @@ public class HttpShadowEvaluationService implements ShadowEvaluationService {
             return conn.getResponseCode() == 200;
         } catch (Exception e) {
             return false;
+        } finally {
+            disconnectQuietly(conn);
         }
     }
 
@@ -236,6 +254,15 @@ public class HttpShadowEvaluationService implements ShadowEvaluationService {
                 : conn.getErrorStream()) {
             if (is == null) return "";
             return new String(is.readAllBytes(), StandardCharsets.UTF_8);
+        }
+    }
+
+    private void disconnectQuietly(HttpURLConnection conn) {
+        if (conn != null) {
+            try {
+                conn.disconnect();
+            } catch (Exception ignored) {
+            }
         }
     }
 

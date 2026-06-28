@@ -129,7 +129,7 @@ class InferenceEngine:
                     station_id, features,
                     'TIME_SERIES_PREDICTION'
                     if self._error_counters[error_key] == 1
-                    else 'TIME_SERIES_PREDICTION',
+                    else 'NEIGHBOR_INTERPOLATION',
                     'SUGGEST_REPLACE'
                 )
             else:

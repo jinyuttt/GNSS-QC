@@ -1,5 +1,7 @@
 """RRCF 鲁棒随机割森林 — 基于统计分布的异常检测"""
 
+import hashlib
+import json
 import numpy as np
 import os
 import pickle
@@ -172,15 +174,28 @@ class RRCFModel:
             'sample_pool': self._sample_pool.tolist() if self._sample_pool is not None else None,
             'score_history': self._score_history[-500:] if self._score_history else [],
         }
-        with open(os.path.join(dirpath, 'rrcf_state.pkl'), 'wb') as f:
-            pickle.dump(state, f)
+        json_path = os.path.join(dirpath, 'rrcf_state.json')
+        with open(json_path, 'w', encoding='utf-8') as f:
+            json.dump(state, f, ensure_ascii=False)
+        content = json.dumps(state, sort_keys=True).encode('utf-8')
+        digest = hashlib.sha256(content).hexdigest()
+        with open(json_path + '.sha256', 'w') as f:
+            f.write(digest)
 
     def load(self, dirpath: str):
-        state_path = os.path.join(dirpath, 'rrcf_state.pkl')
-        if not os.path.exists(state_path):
+        json_path = os.path.join(dirpath, 'rrcf_state.json')
+        if not os.path.exists(json_path):
             return False
-        with open(state_path, 'rb') as f:
-            state = pickle.load(f)
+        with open(json_path, 'r', encoding='utf-8') as f:
+            content = f.read()
+        sha_path = json_path + '.sha256'
+        if os.path.exists(sha_path):
+            with open(sha_path, 'r') as f:
+                expected = f.read().strip()
+            actual = hashlib.sha256(content.encode('utf-8')).hexdigest()
+            if actual != expected:
+                raise ValueError(f"RRCF state integrity check failed: {json_path}")
+        state = json.loads(content)
         self.num_trees = state['num_trees']
         self.tree_size = state['tree_size']
         self.shingle_size = state['shingle_size']
