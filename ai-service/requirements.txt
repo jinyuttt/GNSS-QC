@@ -1,0 +1,25 @@
+# GNSS-QC 影子评测服务 Python依赖
+# 安装: pip install -r requirements.txt
+
+# Web框架
+flask>=3.0.0
+
+# 数值计算
+numpy>=1.24.0
+scipy>=1.11.0
+
+# 机器学习（PyTorch用于LSTM+Attention）
+torch>=2.0.0
+
+# 配置管理
+pyyaml>=6.0
+
+# 定时任务（训练调度）
+schedule>=1.2.0
+
+# 日志
+loguru>=0.7.0
+
+# 可选：高性能存储
+# redis>=5.0.0
+# pymysql>=1.1.0
