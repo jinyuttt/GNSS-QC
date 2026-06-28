@@ -175,10 +175,10 @@ class RRCFModel:
             'score_history': self._score_history[-500:] if self._score_history else [],
         }
         json_path = os.path.join(dirpath, 'rrcf_state.json')
+        content = json.dumps(state, sort_keys=True, ensure_ascii=False)
         with open(json_path, 'w', encoding='utf-8') as f:
-            json.dump(state, f, ensure_ascii=False)
-        content = json.dumps(state, sort_keys=True).encode('utf-8')
-        digest = hashlib.sha256(content).hexdigest()
+            f.write(content)
+        digest = hashlib.sha256(content.encode('utf-8')).hexdigest()
         with open(json_path + '.sha256', 'w') as f:
             f.write(digest)
 

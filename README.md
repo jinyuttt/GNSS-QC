@@ -137,7 +137,7 @@ GNSS RTK 原始 NEU 解算结果
 |------|--------|------|
 | **Hampel Identifier**（默认） | `HAMPEL` | 去趋势残差 + 中位数绝对偏差，抗趋势干扰 |
 | IQR法 | `IQR` | 值超出 [Q1 - 1.5×IQR, Q3 + 1.5×IQR] 视为粗差 |
-| 3σ法 | `SIGMA` | 值偏离均值超过3倍标准差视为粗差 |
+| 3σ法 | `THREE_SIGMA` | 值偏离均值超过3倍标准差视为粗差 |
 
 **Hampel算法核心步骤**：
 1. 对窗口数据做线性拟合去趋势，得到残差序列（消除真实形变趋势对检测的干扰）
@@ -152,7 +152,7 @@ GNSS RTK 原始 NEU 解算结果
 
 当L3检测到粗差时，将异常值替换为窗口统计量：
 
-- 替换值 = 窗口中位数（IQR/Hampel法）或 窗口均值（3σ法）
+- 替换值 = 窗口中位数（IQR/Hampel法）或 窗口均值（THREE_SIGMA法）
 - 替换后清除异常标记，数据继续进入后续层
 - 无粗差时此层跳过
 
@@ -413,7 +413,7 @@ ShadowEvaluationResult shadow = client.infer(fv);
 
 ### 环境要求
 
-- JDK 17+
+- JDK 21+
 - Maven 3.6+
 
 ### 构建与测试
@@ -430,6 +430,9 @@ mvn test -Dtest=CleaningPipelineTest
 
 # 仅运行单元测试
 mvn test -Dtest=DisplacementCalculatorTest
+
+# 仅运行修复验证测试
+mvn test -Dtest=BugFixTest
 ```
 
 ### 最小使用示例
