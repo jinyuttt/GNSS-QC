@@ -29,7 +29,7 @@ model:
 # 定时训练任务
 # ============================================================
 train_task:
-  interval_min: 5               # 训练间隔（分钟）
+  interval_min: 600             # 训练间隔（分钟，600=10小时）
   max_fetch_num: 10000          # 单次最大拉取数据量
 
 # ============================================================
@@ -68,21 +68,27 @@ rrcf:
 # 存储配置
 # ============================================================
 storage:
-  type: "sqlite"                # sqlite / redis / mysql
+  # type 支持三种写法:
+  #   1. 内置快捷名: "sqlite"
+  #   2. 自定义实现: "ai_service.storage.redis_store.RedisStore"
+  #   3. 第三方包:   "my_package.timeseries_store.TimeseriesStore"
+  # 加载失败自动 fallback 到 SQLite
+  type: "sqlite"
   sqlite:
     db_path: "./data/shadow_eval.db"
     hot_ttl_days: 3             # 热数据保留天数
     full_ttl_days: 30           # 全量数据保留天数
-  redis:
-    host: "localhost"
-    port: 6379
-    db: 0
-  mysql:
-    host: "localhost"
-    port: 3306
-    user: "root"
-    password: ""
-    database: "gnss_shadow"
+  # 以下为自定义实现的配置示例，按需启用
+  # redis:
+  #   host: "localhost"
+  #   port: 6379
+  #   db: 0
+  # mysql:
+  #   host: "localhost"
+  #   port: 3306
+  #   user: "root"
+  #   password: ""
+  #   database: "gnss_shadow"
 
 # ============================================================
 # 日志配置
