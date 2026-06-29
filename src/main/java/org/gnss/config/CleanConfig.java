@@ -26,6 +26,9 @@ public class CleanConfig {
     /** 最小Ratio（FIX解），默认：3.0 */
     public double minRatio = 3.0;
 
+    /** 最大位移阈值（米），N/E/U任一分量绝对值超过此值直接拒绝，默认：2000 */
+    public double maxDisplacement = 2000;
+
     // ========== 第二层：相邻跳变检测 ==========
 
     /** 水平方向最大跳变阈值（米），默认：0.05 */

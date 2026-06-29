@@ -174,6 +174,8 @@ public class DefaultDisplacementCalculator implements DisplacementCalculator {
         if (cleanResult.isPassed()) {
             DeviceState state = cache.get(deviceId);
             if (state != null) {
+                computeVelocityAndAcceleration(cleanResult, result, state);
+
                 DeviceDiagnosis diagnosis = diagnostician.diagnose(state, result);
                 result.setDiagnosis(diagnosis);
 
@@ -374,6 +376,69 @@ public class DefaultDisplacementCalculator implements DisplacementCalculator {
             }
         } catch (Exception e) {
             System.err.println("Failed to recover device state for " + deviceId + ": " + e.getMessage());
+        }
+    }
+
+    /**
+     * 基于历史位移数据精确计算速度和加速度
+     * <p>
+     * 速度 = (当前位移 - 上一合法位移) / 时间间隔
+     * 加速度 = (当前速度 - 上一速度) / 时间间隔
+     * 时间间隔取当前历元与上一合法历元的时间差（秒），无时间戳时按1历元/秒估算
+     * </p>
+     *
+     * @param cleanResult 清洗结果（写入velocityN/E/U, accelerationN/E/U）
+     * @param result      当前位移结果
+     * @param state       设备状态（含上一合法位移和上上一次合法位移）
+     */
+    private void computeVelocityAndAcceleration(CleanResult cleanResult,
+                                                 DisplacementResult result,
+                                                 DeviceState state) {
+        if (!state.isLastValidInitialized()) {
+            return;
+        }
+
+        double currentN = result.getdNorth();
+        double currentE = result.getdEast();
+        double currentU = result.getdUp();
+
+        double lastN = state.getLastValidNorth();
+        double lastE = state.getLastValidEast();
+        double lastU = state.getLastValidUp();
+
+        double dtSeconds = 1.0;
+        if (result.getTimestamp() != null && state.getLastUpdateTime() > 0) {
+            long currentMs = result.getTimestamp().toEpochMilli();
+            long lastMs = state.getLastUpdateTime();
+            long diffMs = currentMs - lastMs;
+            if (diffMs > 0) {
+                dtSeconds = diffMs / 1000.0;
+            }
+        }
+
+        double velN = (currentN - lastN) / dtSeconds;
+        double velE = (currentE - lastE) / dtSeconds;
+        double velU = (currentU - lastU) / dtSeconds;
+
+        cleanResult.setVelocityN(velN);
+        cleanResult.setVelocityE(velE);
+        cleanResult.setVelocityU(velU);
+
+        double prevN = state.getPrevValidNorth();
+        double prevE = state.getPrevValidEast();
+        double prevU = state.getPrevValidUp();
+
+        boolean hasPrev = state.getNorthWindow() != null
+                && state.getNorthWindow().size() >= 2;
+
+        if (hasPrev) {
+            double prevVelN = (lastN - prevN) / dtSeconds;
+            double prevVelE = (lastE - prevE) / dtSeconds;
+            double prevVelU = (lastU - prevU) / dtSeconds;
+
+            cleanResult.setAccelerationN((velN - prevVelN) / dtSeconds);
+            cleanResult.setAccelerationE((velE - prevVelE) / dtSeconds);
+            cleanResult.setAccelerationU((velU - prevVelU) / dtSeconds);
         }
     }
 }

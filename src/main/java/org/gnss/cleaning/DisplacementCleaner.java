@@ -304,6 +304,18 @@ public class DisplacementCleaner {
             return CleanResult.fail(result, 1, "Invalid or single solution");
         }
 
+        if (config.maxDisplacement > 0) {
+            double absN = Math.abs(result.getdNorth());
+            double absE = Math.abs(result.getdEast());
+            double absU = Math.abs(result.getdUp());
+            if (absN > config.maxDisplacement || absE > config.maxDisplacement || absU > config.maxDisplacement) {
+                result.setAbnormal(true);
+                result.setAbnormalReason(String.format("Layer1: displacement exceeds max (%.4f/%.4f/%.4f > %.4f)",
+                        absN, absE, absU, config.maxDisplacement));
+                return CleanResult.fail(result, 1, "Displacement exceeds maximum threshold");
+            }
+        }
+
         if (status == SolutionStatus.FLOAT) {
             result.setDowngraded(true);
             if (result.getNumSatellites() < config.minSatellite) {

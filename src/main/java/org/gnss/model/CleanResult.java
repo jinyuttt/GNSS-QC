@@ -68,6 +68,24 @@ public class CleanResult {
     /** 窗口稳定度（历史40条max-min，米），默认：0.0 */
     private double windowStability;
 
+    /** 北向速度（米/秒），基于当前与上一合法位移差分计算，默认：0.0 */
+    private double velocityN;
+
+    /** 东向速度（米/秒），基于当前与上一合法位移差分计算，默认：0.0 */
+    private double velocityE;
+
+    /** 天向速度（米/秒），基于当前与上一合法位移差分计算，默认：0.0 */
+    private double velocityU;
+
+    /** 北向加速度（米/秒²），基于当前与上一速度差分计算，默认：0.0 */
+    private double accelerationN;
+
+    /** 东向加速度（米/秒²），基于当前与上一速度差分计算，默认：0.0 */
+    private double accelerationE;
+
+    /** 天向加速度（米/秒²），基于当前与上一速度差分计算，默认：0.0 */
+    private double accelerationU;
+
     public CleanResult() {
     }
 
@@ -257,6 +275,54 @@ public class CleanResult {
         this.windowStability = windowStability;
     }
 
+    public double getVelocityN() {
+        return velocityN;
+    }
+
+    public void setVelocityN(double velocityN) {
+        this.velocityN = velocityN;
+    }
+
+    public double getVelocityE() {
+        return velocityE;
+    }
+
+    public void setVelocityE(double velocityE) {
+        this.velocityE = velocityE;
+    }
+
+    public double getVelocityU() {
+        return velocityU;
+    }
+
+    public void setVelocityU(double velocityU) {
+        this.velocityU = velocityU;
+    }
+
+    public double getAccelerationN() {
+        return accelerationN;
+    }
+
+    public void setAccelerationN(double accelerationN) {
+        this.accelerationN = accelerationN;
+    }
+
+    public double getAccelerationE() {
+        return accelerationE;
+    }
+
+    public void setAccelerationE(double accelerationE) {
+        this.accelerationE = accelerationE;
+    }
+
+    public double getAccelerationU() {
+        return accelerationU;
+    }
+
+    public void setAccelerationU(double accelerationU) {
+        this.accelerationU = accelerationU;
+    }
+
     /**
      * 提取影子评测特征向量（10维语义特征 + 原始基准数据）
      * <p>
@@ -293,9 +359,12 @@ public class CleanResult {
         fv.setF8SameDirectionNeighborRatio(sameDirectionNeighborRatio);
         fv.setF9SolutionQuality(solutionQuality);
         fv.setF10WindowStability(windowStability);
-        fv.setVelocityN(horizontalChangeRate * 0.7071);
-        fv.setVelocityE(horizontalChangeRate * 0.7071);
-        fv.setVelocityU(verticalChangeRate);
+        fv.setVelocityN(velocityN);
+        fv.setVelocityE(velocityE);
+        fv.setVelocityU(velocityU);
+        fv.setAccelerationN(accelerationN);
+        fv.setAccelerationE(accelerationE);
+        fv.setAccelerationU(accelerationU);
         return fv;
     }
 }
