@@ -449,14 +449,8 @@ public class DisplacementCleaner {
         result.setAbnormalReason("Layer2: jump N=" + String.format("%.4f", dN)
                 + " E=" + String.format("%.4f", dE) + " U=" + String.format("%.4f", dU));
 
-        // 记录跳变方向（用于后续快速通道判断）
         state.recordJumpDirection(signN, signE, signU, config.trendQuickReleaseCount * 2);
         state.updateConsecutiveSameDirection(false);
-
-        // 更新上一合法值（即使跳变也更新，避免死循环）
-        state.setLastValidNorth(result.getdNorth());
-        state.setLastValidEast(result.getdEast());
-        state.setLastValidUp(result.getdUp());
 
         return CleanResult.fail(result, 2, "Jump detected, waiting for confirmation");
     }
@@ -954,7 +948,12 @@ public class DisplacementCleaner {
      * @param state  设备状态
      */
     private void updateWindows(DisplacementResult result, DeviceState state) {
-        if (result.getStatus() == SolutionStatus.FIX && !result.isDowngraded()) {
+        boolean wasL2Jump = result.getAbnormalReason() != null
+                && result.getAbnormalReason().startsWith("Layer2:");
+        boolean isFloatDowngraded = result.isDowngraded();
+        boolean shouldUpdateState = !wasL2Jump && !isFloatDowngraded;
+
+        if (result.getStatus() == SolutionStatus.FIX && !result.isDowngraded() && !wasL2Jump) {
             addToWindow(state.getNorthWindow(), result.getdNorth(), config.windowSize);
             addToWindow(state.getEastWindow(), result.getdEast(), config.windowSize);
             addToWindow(state.getUpWindow(), result.getdUp(), config.windowSize);
@@ -963,23 +962,27 @@ public class DisplacementCleaner {
             addToWindow(state.getFastBaselineEast(), result.getdEast(), config.longTermWindowSize);
             addToWindow(state.getFastBaselineUp(), result.getdUp(), config.longTermWindowSize);
 
-            // 累积初始基线（前10个FIX解均值）
             if (!state.isInitialBaselineEstablished()) {
                 state.accumulateInitialBaseline(result.getdNorth(), result.getdEast(), result.getdUp());
             }
         }
 
-        addToWindow(state.getSlowBaselineNorth(), result.getdNorth(), config.slowBaselineSize);
-        addToWindow(state.getSlowBaselineEast(), result.getdEast(), config.slowBaselineSize);
-        addToWindow(state.getSlowBaselineUp(), result.getdUp(), config.slowBaselineSize);
+        if (shouldUpdateState) {
+            addToWindow(state.getSlowBaselineNorth(), result.getdNorth(), config.slowBaselineSize);
+            addToWindow(state.getSlowBaselineEast(), result.getdEast(), config.slowBaselineSize);
+            addToWindow(state.getSlowBaselineUp(), result.getdUp(), config.slowBaselineSize);
+        }
 
         state.setPrevValidNorth(state.getLastValidNorth());
         state.setPrevValidEast(state.getLastValidEast());
         state.setPrevValidUp(state.getLastValidUp());
-        state.setLastValidNorth(result.getdNorth());
-        state.setLastValidEast(result.getdEast());
-        state.setLastValidUp(result.getdUp());
-        state.setLastValidInitialized(true);
+
+        if (shouldUpdateState) {
+            state.setLastValidNorth(result.getdNorth());
+            state.setLastValidEast(result.getdEast());
+            state.setLastValidUp(result.getdUp());
+            state.setLastValidInitialized(true);
+        }
         state.setLastUpdateTime(System.currentTimeMillis());
     }
 

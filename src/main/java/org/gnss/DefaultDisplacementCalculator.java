@@ -235,7 +235,7 @@ public class DefaultDisplacementCalculator implements DisplacementCalculator {
             }
         }
 
-        if (persistenceConfig.enablePersistence && persistenceCallback != null) {
+        if (persistenceConfig.enablePersistence && persistenceCallback != null && cleanResult.isPassed()) {
             persistenceCallback.saveResult(deviceId, result);
         }
 
