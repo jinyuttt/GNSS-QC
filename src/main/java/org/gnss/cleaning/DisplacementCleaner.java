@@ -18,13 +18,20 @@ import java.util.Map;
 import java.util.TimeZone;
 
 /**
- * 六层递进过滤清洗器
+ * 五层递进过滤清洗器（L1~L5）
  * <p>
- * 对位移结果进行逐层递进的质量控制，每一层独立判断，未通过则标记异常并阻止进入下一层。
- * 清洗流程：质量门禁 → 跳变检测 → 统计粗差 → 值替换 → 基线记忆 → 空间联合校验。
+ * 对单设备位移结果进行逐层递进的质量控制，每一层独立判断，未通过则标记异常并阻止进入下一层。
+ * 清洗流程：质量门禁 → 跳变检测 → 统计粗差 → 值替换 → 基线记忆。
+ * </p>
+ * <p>
+ * 第6层（空间联合校验）和第7层（综合仲裁）为独立接口，由外部编排调用：
+ * <ul>
+ *   <li>L6: {@link SpatialCheckService#spatialCheck} — 需要整组设备数据，外部收集后批量传入</li>
+ *   <li>L7: {@link Layer7ArbitrationService#arbitrate} — 基于L5/L6输出做最终仲裁</li>
+ * </ul>
  * </p>
  *
- * <h3>六层清洗说明</h3>
+ * <h3>五层清洗说明</h3>
  * <table>
  *   <tr><th>层级</th><th>名称</th><th>作用</th></tr>
  *   <tr><td>1</td><td>质量门禁</td><td>卫星数、PDOP、RMS、Ratio等基本质量检查</td></tr>
@@ -32,7 +39,6 @@ import java.util.TimeZone;
  *   <tr><td>3</td><td>统计粗差</td><td>滑动窗口Hampel/IQR/3σ粗差检测</td></tr>
  *   <tr><td>4</td><td>值替换</td><td>粗差被替换为窗口中位数/均值</td></tr>
  *   <tr><td>5</td><td>基线记忆</td><td>快慢基线对比，检测阶跃偏移</td></tr>
- *   <tr><td>6</td><td>空间联合校验</td><td>多设备空间一致性校验，离群值替换为组中位数</td></tr>
  * </table>
  */
 public class DisplacementCleaner {
@@ -141,7 +147,8 @@ public class DisplacementCleaner {
      * 单条结果清洗（无历史上下文）
      * <p>
      * 执行流程：Layer1(质量门禁) → Layer3(统计粗差) → Layer4(值替换) → Layer5(基线记忆)
-     * <br>跳过Layer2(跳变检测)和Layer6(空间校验)，因为它们依赖历史上下文或多设备数据。
+     * <br>跳过Layer2(跳变检测)，因为依赖历史上下文。
+     * <br>Layer6(空间校验)和Layer7(综合仲裁)为独立接口，不在此流程中。
      * <br>使用临时DeviceState，不持久化到缓存。
      * </p>
      *
@@ -176,7 +183,7 @@ public class DisplacementCleaner {
     }
 
     /**
-     * 带历史上下文的完整六层清洗
+     * 带历史上下文的清洗（L1~L5全流程）
      * <p>
      * 执行流程：
      * <ol>
@@ -185,9 +192,9 @@ public class DisplacementCleaner {
      *   <li>统计粗差：滑动窗口Hampel/IQR/3σ检测</li>
      *   <li>值替换：将粗差替换为窗口中位数/均值（仅当第3层检测到粗差时）</li>
      *   <li>基线记忆：快慢基线对比检测阶跃</li>
-     *   <li>空间联合校验：多设备空间一致性校验，离群值替换为组中位数</li>
      * </ol>
-     * 全部通过后更新滑动窗口和上一合法值
+     * 全部通过后更新滑动窗口和上一合法值。
+     * Layer6(空间校验)和Layer7(综合仲裁)为独立接口，由外部编排调用。
      * </p>
      *
      * @param result   位移结果
@@ -204,10 +211,8 @@ public class DisplacementCleaner {
 
         double stepFlag = 0.0;
         double timeSeriesResidual = 0.0;
-        double spatialResidual = 0.0;
         double horizontalChangeRate = 0.0;
         double verticalChangeRate = 0.0;
-        double sameDirectionNeighborRatio = 1.0;
         double windowStability = 0.0;
 
         CleanResult r1 = layer1QualityGate(result);
@@ -234,12 +239,6 @@ public class DisplacementCleaner {
             stepFlag = 1.0;
         }
 
-        spatialResidual = computeSpatialResidual(result, state, deviceId);
-        sameDirectionNeighborRatio = computeSameDirectionNeighborRatio(result, state, deviceId);
-        if (!result.isAbnormal()) {
-            layer6SpatialCheck(result, state, deviceId);
-        }
-
         updateWindows(result, state);
         result.setCleaned(true);
 
@@ -253,12 +252,10 @@ public class DisplacementCleaner {
             finalResult = CleanResult.pass(result);
         }
         finalResult.setTimeSeriesResidual(timeSeriesResidual);
-        finalResult.setSpatialResidual(spatialResidual);
         finalResult.setSolutionQuality(solutionQuality);
         finalResult.setStepFlag(stepFlag);
         finalResult.setHorizontalChangeRate(horizontalChangeRate);
         finalResult.setVerticalChangeRate(verticalChangeRate);
-        finalResult.setSameDirectionNeighborRatio(sameDirectionNeighborRatio);
         finalResult.setWindowStability(windowStability);
         return finalResult;
     }
@@ -868,73 +865,6 @@ public class DisplacementCleaner {
         return CleanResult.pass(result);
     }
 
-    // ==================== 第六层：空间联合校验 ====================
-
-    /**
-     * 空间联合校验（第六层）
-     * <p>
-     * 利用多设备空间一致性，检测当前设备是否为空间离群点：
-     * <ul>
-     *   <li>收集缓存中其他设备的最近合法位移值</li>
-     *   <li>计算组中位数作为空间参考</li>
-     *   <li>当前设备与组中位数偏差超过阈值时，判定为空间离群</li>
-     *   <li>离群时替换为组中位数，清除异常标记</li>
-     * </ul>
-     * 需要至少 spatialMinNeighbors 个邻居设备才执行校验。
-     * </p>
-     *
-     * @param result   当前位移结果（原地修改）
-     * @param state    当前设备状态
-     * @param deviceId 当前设备ID
-     */
-    private void layer6SpatialCheck(DisplacementResult result, DeviceState state, String deviceId) {
-        if (!config.enableSpatialCheck) {
-            return;
-        }
-
-        Map<String, DeviceState> allStates = cache.getAllDeviceStates();
-
-        List<Double> otherN = new ArrayList<>();
-        List<Double> otherE = new ArrayList<>();
-        List<Double> otherU = new ArrayList<>();
-
-        for (Map.Entry<String, DeviceState> entry : allStates.entrySet()) {
-            if (!entry.getKey().equals(deviceId)) {
-                DeviceState other = entry.getValue();
-                if (other.getLastUpdateTime() > 0) {
-                    otherN.add(other.getLastValidNorth());
-                    otherE.add(other.getLastValidEast());
-                    otherU.add(other.getLastValidUp());
-                }
-            }
-        }
-
-        if (otherN.size() < config.spatialMinNeighbors) {
-            return;
-        }
-
-        double groupMedianN = median(otherN);
-        double groupMedianE = median(otherE);
-        double groupMedianU = median(otherU);
-
-        double devN = Math.abs(result.getdNorth() - groupMedianN);
-        double devE = Math.abs(result.getdEast() - groupMedianE);
-        double devU = Math.abs(result.getdUp() - groupMedianU);
-
-        boolean spatialOutlier = devN > config.spatialOutlierThreshold
-                || devE > config.spatialOutlierThreshold
-                || devU > config.spatialOutlierThreshold;
-
-        if (spatialOutlier) {
-            result.setdNorth(groupMedianN);
-            result.setdEast(groupMedianE);
-            result.setdUp(groupMedianU);
-            result.setAbnormal(false);
-            result.setAbnormalReason("Layer6: replaced spatial outlier");
-            result.setCleaned(true);
-        }
-    }
-
     // ==================== 工具方法 ====================
 
     /**
@@ -1086,43 +1016,6 @@ public class DisplacementCleaner {
         return Math.max(resN, Math.max(resE, resU));
     }
 
-    double computeSpatialResidual(DisplacementResult result, DeviceState state, String deviceId) {
-        if (!config.enableSpatialCheck) {
-            return 0.0;
-        }
-
-        Map<String, DeviceState> allStates = cache.getAllDeviceStates();
-
-        List<Double> otherN = new ArrayList<>();
-        List<Double> otherE = new ArrayList<>();
-        List<Double> otherU = new ArrayList<>();
-
-        for (Map.Entry<String, DeviceState> entry : allStates.entrySet()) {
-            if (!entry.getKey().equals(deviceId)) {
-                DeviceState other = entry.getValue();
-                if (other.getLastUpdateTime() > 0) {
-                    otherN.add(other.getLastValidNorth());
-                    otherE.add(other.getLastValidEast());
-                    otherU.add(other.getLastValidUp());
-                }
-            }
-        }
-
-        if (otherN.size() < config.spatialMinNeighbors) {
-            return 0.0;
-        }
-
-        double groupMedianN = median(otherN);
-        double groupMedianE = median(otherE);
-        double groupMedianU = median(otherU);
-
-        double devN = Math.abs(result.getdNorth() - groupMedianN);
-        double devE = Math.abs(result.getdEast() - groupMedianE);
-        double devU = Math.abs(result.getdUp() - groupMedianU);
-
-        return Math.max(devN, Math.max(devE, devU));
-    }
-
     double computeSolutionQuality(DisplacementResult result) {
         if (result.getStatus() == SolutionStatus.INVALID || result.getStatus() == SolutionStatus.SINGLE) {
             return 0.0;
@@ -1152,36 +1045,6 @@ public class DisplacementCleaner {
 
     double computeVerticalChangeRate(DisplacementResult result, DeviceState state) {
         return Math.abs(result.getdUp() - state.getLastValidUp());
-    }
-
-    double computeSameDirectionNeighborRatio(DisplacementResult result, DeviceState state, String deviceId) {
-        if (!config.enableSpatialCheck) {
-            return 1.0;
-        }
-
-        Map<String, DeviceState> allStates = cache.getAllDeviceStates();
-        int total = 0;
-        int sameDir = 0;
-
-        double dN = result.getdNorth() - state.getLastValidNorth();
-        double dE = result.getdEast() - state.getLastValidEast();
-
-        for (Map.Entry<String, DeviceState> entry : allStates.entrySet()) {
-            if (entry.getKey().equals(deviceId)) continue;
-            DeviceState other = entry.getValue();
-            if (other.getLastUpdateTime() <= 0) continue;
-
-            total++;
-            double otherDn = other.getLastValidNorth() - other.getPrevValidNorth();
-            double otherDe = other.getLastValidEast() - other.getPrevValidEast();
-
-            if (dN * otherDn + dE * otherDe > 0) {
-                sameDir++;
-            }
-        }
-
-        if (total == 0) return 1.0;
-        return (double) sameDir / total;
     }
 
     double computeWindowStability(DeviceState state) {

@@ -1,6 +1,7 @@
 package org.gnss;
 
 import org.gnss.cache.DeviceStateCache;
+import org.gnss.cleaning.DefaultSpatialCheckService;
 import org.gnss.cleaning.DisplacementCleaner;
 import org.gnss.cleaning.Layer7Arbitrator;
 import org.gnss.config.CacheConfig;
@@ -13,10 +14,12 @@ import org.gnss.model.*;
 
 import org.gnss.persistence.HistoryDataProvider;
 import org.gnss.persistence.PersistenceCallback;
+import org.gnss.cleaning.SpatialCheckService;
 
 import java.time.Instant;
 import java.time.ZoneOffset;
 import java.time.format.DateTimeFormatter;
+import java.util.List;
 import java.util.concurrent.atomic.AtomicInteger;
 
 /**
@@ -62,6 +65,7 @@ public class DefaultDisplacementCalculator implements DisplacementCalculator {
     private final DisplacementCleaner cleaner;
     private final DeviceDiagnostician diagnostician;
     private final Layer7Arbitrator layer7Arbitrator;
+    private final SpatialCheckService spatialCheckService;
 
     private final AtomicInteger idSequence = new AtomicInteger(0);
     private final DateTimeFormatter idFormatter = DateTimeFormatter.ofPattern("yyyyMMddHHmmssSSS")
@@ -105,6 +109,27 @@ public class DefaultDisplacementCalculator implements DisplacementCalculator {
                                           DiagnosisConfig diagnosisConfig, CacheConfig cacheConfig,
                                           PersistenceConfig persistenceConfig, PersistenceCallback persistenceCallback,
                                           Layer7Config layer7Config, HistoryDataProvider historyDataProvider) {
+        this(cleanConfig, diagnosisConfig, cacheConfig, persistenceConfig,
+                persistenceCallback, layer7Config, historyDataProvider, null);
+    }
+
+    /**
+     * 构造清洗引擎（完整参数）
+     *
+     * @param cleanConfig         清洗配置
+     * @param diagnosisConfig     设备诊断配置
+     * @param cacheConfig         缓存配置
+     * @param persistenceConfig   持久化配置
+     * @param persistenceCallback 持久化回调接口实现
+     * @param layer7Config        第七层仲裁配置（null则不启用第七层）
+     * @param historyDataProvider 第七层历史数据提供者（null则不启用第七层）
+     * @param spatialCheckService 第6层空间校验服务（null则使用默认实现）
+     */
+    public DefaultDisplacementCalculator(CleanConfig cleanConfig,
+                                          DiagnosisConfig diagnosisConfig, CacheConfig cacheConfig,
+                                          PersistenceConfig persistenceConfig, PersistenceCallback persistenceCallback,
+                                          Layer7Config layer7Config, HistoryDataProvider historyDataProvider,
+                                          SpatialCheckService spatialCheckService) {
         this.cleanConfig = cleanConfig;
         this.diagnosisConfig = diagnosisConfig;
         this.cacheConfig = cacheConfig;
@@ -122,6 +147,13 @@ public class DefaultDisplacementCalculator implements DisplacementCalculator {
         } else {
             this.layer7Config = layer7Config;
             this.layer7Arbitrator = null;
+        }
+
+        if (spatialCheckService != null) {
+            this.spatialCheckService = spatialCheckService;
+        } else {
+            this.spatialCheckService = new DefaultSpatialCheckService(
+                    cleanConfig.spatialOutlierThreshold, cleanConfig.spatialMinNeighbors);
         }
     }
 
@@ -209,30 +241,6 @@ public class DefaultDisplacementCalculator implements DisplacementCalculator {
 
             long ts = result.getTimestamp() != null ? result.getTimestamp().toEpochMilli() : System.currentTimeMillis();
             historyDataProvider.saveHistory(deviceId, ts, cleanResult, wcsScore);
-
-            if (layer7Config.enabled) {
-                Layer7ArbitrationResult arbResult = layer7Arbitrator.arbitrate(
-                        result, cleanResult,
-                        cleanResult.getTimeSeriesResidual(),
-                        cleanResult.getSpatialResidual(),
-                        cleanResult.getSolutionQuality(),
-                        cleanResult.getStepFlag(),
-                        deviceId
-                );
-
-                cleanResult.setLayer7WcsScore(arbResult.getWcsScore());
-                cleanResult.setLayer7Corrected(arbResult.isLayer7Corrected());
-                cleanResult.setLayer7ConfidenceScore(arbResult.getConfidenceScore());
-                cleanResult.setLayer7Skipped(arbResult.isLayer7Skipped());
-                cleanResult.setLayer7SkipReason(arbResult.getSkipReason());
-                cleanResult.setLayer7TrendProtectionTriggered(arbResult.isTrendProtectionTriggered());
-
-                if (arbResult.isLayer7Corrected()) {
-                    result.setAbnormal(true);
-                    result.setAbnormalReason("Layer7仲裁替换: " + arbResult.getReplacementSource());
-                    result.setCleaned(true);
-                }
-            }
         }
 
         if (persistenceConfig.enablePersistence && persistenceCallback != null && cleanResult.isPassed()) {
@@ -258,6 +266,55 @@ public class DefaultDisplacementCalculator implements DisplacementCalculator {
             diagnostician.processTemperature(meta.getTemperature(), state);
         }
         return cleanWithHistory(result, deviceId);
+    }
+
+    // ==================== 独立接口：第6层 / 第7层 ====================
+
+    /**
+     * 第6层空间一致性校验 — 独立接口
+     * <p>
+     * 委托给 {@link SpatialCheckService} 实现，可脱离主链路独立调用。
+     * 默认使用 {@link DefaultSpatialCheckService}（纯Java，无Python依赖），
+     * 也可通过构造函数注入自定义实现。
+     * </p>
+     *
+     * @param groupInputs 组内所有设备数据（至少2个设备）
+     * @return 每个设备的空间校验结果（顺序与输入一致）
+     */
+    @Override
+    public List<SpatialCheckResult> spatialCheck(List<SpatialGroupInput> groupInputs) {
+        return spatialCheckService.spatialCheck(groupInputs);
+    }
+
+    /**
+     * 第7层综合仲裁 — 独立接口
+     * <p>
+     * 委托给 {@link Layer7Arbitrator} 实现，可脱离主链路独立调用。
+     * 第七层未启用时返回 null。
+     * </p>
+     *
+     * @param result              位移结果
+     * @param cleanResult         清洗结果
+     * @param timeSeriesResidual  第3层时序残差
+     * @param spatialResidual     第6层空间残差
+     * @param solutionQuality     解算质量归一化值（0~1，1=最优）
+     * @param stepFlag            阶跃标记（0或1）
+     * @param stationId           测点ID
+     * @return 第七层仲裁结果（第七层未启用时返回null）
+     */
+    @Override
+    public Layer7ArbitrationResult layer7Arbitrate(DisplacementResult result,
+                                                     CleanResult cleanResult,
+                                                     double timeSeriesResidual,
+                                                     double spatialResidual,
+                                                     double solutionQuality,
+                                                     double stepFlag,
+                                                     String stationId) {
+        if (layer7Arbitrator == null) {
+            return null;
+        }
+        return layer7Arbitrator.arbitrate(result, cleanResult,
+                timeSeriesResidual, spatialResidual, solutionQuality, stepFlag, stationId);
     }
 
     // ==================== 设备状态管理 ====================

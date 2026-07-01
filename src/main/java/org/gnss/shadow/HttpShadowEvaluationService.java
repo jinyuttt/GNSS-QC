@@ -5,7 +5,7 @@ import com.alibaba.fastjson2.JSONArray;
 import com.alibaba.fastjson2.JSONObject;
 import org.gnss.model.ShadowEvaluationResult;
 import org.gnss.model.ShadowFeatureVector;
-import org.gnss.persistence.ShadowEvaluationService;
+import org.gnss.shadow.ShadowEvaluationService;
 
 import java.io.IOException;
 import java.io.OutputStream;

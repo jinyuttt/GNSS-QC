@@ -5,7 +5,7 @@ import org.gnss.cleaning.Layer7Arbitrator;
 import org.gnss.cache.DeviceStateCache;
 import org.gnss.config.*;
 import org.gnss.model.*;
-import org.gnss.persistence.ShadowEvaluationService;
+import org.gnss.shadow.ShadowEvaluationService;
 import org.gnss.shadow.ShadowEvaluationClient;
 import org.junit.jupiter.api.*;
 

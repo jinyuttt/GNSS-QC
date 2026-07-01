@@ -1,4 +1,4 @@
-package org.gnss.persistence;
+package org.gnss.shadow;
 
 import org.gnss.model.ShadowEvaluationResult;
 import org.gnss.model.ShadowFeatureVector;

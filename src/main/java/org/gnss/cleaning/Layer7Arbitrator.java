@@ -6,6 +6,7 @@ import org.gnss.model.DisplacementResult;
 import org.gnss.model.Layer7ArbitrationResult;
 import org.gnss.model.Layer7HistoryRecord;
 import org.gnss.persistence.HistoryDataProvider;
+import org.gnss.cleaning.Layer7ArbitrationService;
 
 import java.util.ArrayList;
 import java.util.Collections;
@@ -31,7 +32,7 @@ import java.util.concurrent.*;
  * 输入 → 计算WCS分数 → Score > 0.85? → 查询历史 → 三项判决 → 趋势保护 → 输出
  * </pre>
  */
-public class Layer7Arbitrator {
+public class Layer7Arbitrator implements Layer7ArbitrationService {
 
     private final Layer7Config config;
     private final HistoryDataProvider historyProvider;
@@ -78,6 +79,7 @@ public class Layer7Arbitrator {
      * @param stationId           测点ID
      * @return 第七层仲裁结果
      */
+    @Override
     public Layer7ArbitrationResult arbitrate(
             DisplacementResult result,
             CleanResult cleanResult,
@@ -150,6 +152,7 @@ public class Layer7Arbitrator {
      * @param stepFlag           阶跃标记（0或1）
      * @return WCS分数（0~1）
      */
+    @Override
     public double computeWcs(double timeSeriesResidual, double spatialResidual,
                       double solutionQuality, double stepFlag) {
         double timeComponent = config.weightTime * sigmoid(Math.abs(timeSeriesResidual));
@@ -474,9 +477,15 @@ public class Layer7Arbitrator {
         return Math.max(0.0, Math.min(1.0, v));
     }
 
+    @Override
+    public boolean isAvailable() {
+        return historyProvider != null && historyProvider.isAvailable();
+    }
+
     /**
      * 关闭仲裁器，释放超时守护线程
      */
+    @Override
     public void shutdown() {
         timeoutExecutor.shutdownNow();
         try {

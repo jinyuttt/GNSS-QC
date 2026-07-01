@@ -4,7 +4,7 @@ import org.gnss.config.Layer7Config;
 import org.gnss.model.CleanResult;
 import org.gnss.model.ShadowEvaluationResult;
 import org.gnss.model.ShadowFeatureVector;
-import org.gnss.persistence.ShadowEvaluationService;
+import org.gnss.shadow.ShadowEvaluationService;
 
 import java.util.ArrayList;
 import java.util.List;

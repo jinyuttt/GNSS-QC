@@ -2,7 +2,7 @@ package org.gnss.cleaning;
 
 import org.gnss.model.SpatialCheckResult;
 import org.gnss.model.SpatialGroupInput;
-import org.gnss.persistence.SpatialCheckService;
+import org.gnss.cleaning.SpatialCheckService;
 
 import java.util.ArrayList;
 import java.util.Collections;

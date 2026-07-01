@@ -1,4 +1,4 @@
-package org.gnss.persistence;
+package org.gnss.cleaning;
 
 import org.gnss.model.SpatialCheckResult;
 import org.gnss.model.SpatialGroupInput;
@@ -25,7 +25,7 @@ import java.util.List;
  *
  * <h3>调用方式</h3>
  * <pre>{@code
- * SpatialCheckService spatialService = new HttpSpatialCheckService("http://localhost:8500");
+ * SpatialCheckService spatialService = new DefaultSpatialCheckService(0.03, 2);
  * List<SpatialGroupInput> groupData = new ArrayList<>();
  * groupData.add(new SpatialGroupInput("dev-1", 0.012, 0.005, 0.003, "FIX", epochMs));
  * groupData.add(new SpatialGroupInput("dev-2", 0.015, 0.004, 0.002, "FIX", epochMs));

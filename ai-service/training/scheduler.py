@@ -3,6 +3,7 @@
 import time
 import threading
 import numpy as np
+from datetime import datetime, timedelta
 from typing import Dict, Optional, List
 
 from models.rrcf import RRCFModel
@@ -26,7 +27,8 @@ class IncrementalTrainer:
                  model_manager: ModelManager,
                  inference_engine=None,
                  interval_min: int = 5, max_fetch_num: int = 10000,
-                 trigger_sample: int = 5000, trigger_round: int = 6):
+                 trigger_sample: int = 5000, trigger_round: int = 6,
+                 daily_hour: int = 2, daily_fetch_hours: int = 24):
         self.rrcf = rrcf
         self.lstm = lstm
         self.normalizer = normalizer
@@ -38,13 +40,17 @@ class IncrementalTrainer:
         self.max_fetch_num = max_fetch_num
         self.trigger_sample = trigger_sample
         self.trigger_round = trigger_round
+        self.daily_hour = daily_hour
+        self.daily_fetch_hours = daily_fetch_hours
 
         self._running = False
         self._thread = None
+        self._daily_thread = None
         self._lock = threading.Lock()
         self._total_samples = 0
         self._total_rounds = 0
         self._last_train_time = int(time.time() * 1000)
+        self._last_daily_date = None
 
         self._baseline_conflict_rate = None
         self._lstm_train_counter = 0
@@ -55,12 +61,16 @@ class IncrementalTrainer:
         self._running = True
         self._thread = threading.Thread(target=self._loop, daemon=True)
         self._thread.start()
-        print(f"[Trainer] Started, interval={self.interval_min}min")
+        self._daily_thread = threading.Thread(target=self._daily_loop, daemon=True)
+        self._daily_thread.start()
+        print(f"[Trainer] Started, interval={self.interval_min}min, daily@{self.daily_hour}:00")
 
     def stop(self):
         self._running = False
         if self._thread:
             self._thread.join(timeout=10)
+        if self._daily_thread:
+            self._daily_thread.join(timeout=10)
 
     def _loop(self):
         while self._running:
@@ -69,6 +79,83 @@ class IncrementalTrainer:
             except Exception as e:
                 print(f"[Trainer] loop error: {e}")
             time.sleep(self.interval_min * 60)
+
+    def _daily_loop(self):
+        while self._running:
+            now = datetime.now()
+            target = now.replace(hour=self.daily_hour, minute=0, second=0, microsecond=0)
+            if now >= target:
+                target += timedelta(days=1)
+            wait_sec = (target - now).total_seconds()
+            print(f"[Trainer] Daily training scheduled at {target}, "
+                  f"waiting {wait_sec:.0f}s")
+            while self._running and wait_sec > 0:
+                sleep_chunk = min(wait_sec, 60)
+                time.sleep(sleep_chunk)
+                wait_sec -= sleep_chunk
+                now = datetime.now()
+                target = now.replace(hour=self.daily_hour, minute=0,
+                                     second=0, microsecond=0)
+                if now >= target:
+                    break
+            if not self._running:
+                break
+            today = datetime.now().strftime('%Y-%m-%d')
+            if self._last_daily_date == today:
+                continue
+            try:
+                print("[Trainer] === Daily training triggered ===")
+                self._run_daily()
+                self._last_daily_date = today
+            except Exception as e:
+                print(f"[Trainer] Daily training error: {e}")
+
+    def _run_daily(self):
+        if not self._lock.acquire(blocking=True, timeout=300):
+            print("[Trainer] Daily training: cannot acquire lock, skip")
+            return
+        try:
+            now = int(time.time() * 1000)
+            start_time = now - self.daily_fetch_hours * 3600 * 1000
+            print(f"[Trainer] Daily training fetching samples "
+                  f"[{start_time}, {now}], window={self.daily_fetch_hours}h")
+
+            samples = self.storage.get_training_samples(
+                start_time, now, self.max_fetch_num
+            )
+
+            if not samples:
+                print("[Trainer] Daily training: no samples, skip")
+                return
+
+            valid_samples = self._filter_samples(samples)
+            print(f"[Trainer] Daily training: got {len(samples)} samples, "
+                  f"{len(valid_samples)} valid")
+
+            if len(valid_samples) < 10:
+                return
+
+            features_dict = self._extract_features(valid_samples)
+            pre_scores = self._get_current_score_distribution(features_dict)
+
+            self.rrcf.update(features_dict)
+            self.normalizer.update(features_dict)
+            self._train_lstm(valid_samples)
+
+            self._total_samples += len(valid_samples)
+            self._total_rounds += 1
+            self._last_train_time = now
+
+            quality_ok = self._validate_model_quality(features_dict, pre_scores)
+            if quality_ok:
+                self._do_archive()
+                print("[Trainer] Daily training: archived new version")
+            else:
+                print("[Trainer] Daily training: quality degraded, skip archiving")
+                self._total_samples = 0
+                self._total_rounds = 0
+        finally:
+            self._lock.release()
 
     def _run_once(self):
         if not self._lock.acquire(blocking=False):
@@ -269,6 +356,9 @@ class IncrementalTrainer:
             'total_samples': self._total_samples,
             'total_rounds': self._total_rounds,
             'interval_min': self.interval_min,
+            'daily_hour': self.daily_hour,
+            'daily_fetch_hours': self.daily_fetch_hours,
+            'last_daily_date': self._last_daily_date,
             'last_train_time': self._last_train_time,
             'lstm_train_counter': self._lstm_train_counter,
             'baseline_conflict_rate': self._baseline_conflict_rate,
