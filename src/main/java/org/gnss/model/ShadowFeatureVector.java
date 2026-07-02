@@ -45,8 +45,8 @@ public class ShadowFeatureVector {
     private double accelerationU;
 
     public ShadowFeatureVector() {
-        this.f8SameDirectionNeighborRatio = 1.0;
-        this.f9SolutionQuality = 1.0;
+        this.f8SameDirectionNeighborRatio = 0.0;
+        this.f9SolutionQuality = 0.0;
     }
 
     public String getStationId() { return stationId; }

@@ -156,15 +156,27 @@ public class DisplacementCleaner {
      * @return 清洗结果
      */
     public CleanResult cleanSingle(DisplacementResult result) {
-        CleanResult r1 = layer1QualityGate(result);
-        if (!r1.isPassed()) {
-            return r1;
-        }
+        double solutionQuality = computeSolutionQuality(result);
 
         DeviceState tempState = new DeviceState();
         tempState.setLastValidNorth(result.getdNorth());
         tempState.setLastValidEast(result.getdEast());
         tempState.setLastValidUp(result.getdUp());
+
+        double horizontalChangeRate = computeHorizontalChangeRate(result, tempState);
+        double verticalChangeRate = computeVerticalChangeRate(result, tempState);
+        double timeSeriesResidual = computeTimeSeriesResidual(result, tempState);
+        double windowStability = computeWindowStability(tempState);
+
+        CleanResult r1 = layer1QualityGate(result);
+        if (!r1.isPassed()) {
+            r1.setTimeSeriesResidual(timeSeriesResidual);
+            r1.setSolutionQuality(solutionQuality);
+            r1.setHorizontalChangeRate(horizontalChangeRate);
+            r1.setVerticalChangeRate(verticalChangeRate);
+            r1.setWindowStability(windowStability);
+            return r1;
+        }
 
         CleanResult r3 = layer3StatisticalOutlier(result, tempState);
         if (!r3.isPassed()) {
@@ -175,11 +187,18 @@ public class DisplacementCleaner {
 
         result.setCleaned(true);
 
+        CleanResult finalResult;
         if (result.isAbnormal()) {
-            return CleanResult.fail(result, 0, result.getAbnormalReason());
+            finalResult = CleanResult.fail(result, 0, result.getAbnormalReason());
         } else {
-            return CleanResult.pass(result);
+            finalResult = CleanResult.pass(result);
         }
+        finalResult.setTimeSeriesResidual(timeSeriesResidual);
+        finalResult.setSolutionQuality(solutionQuality);
+        finalResult.setHorizontalChangeRate(horizontalChangeRate);
+        finalResult.setVerticalChangeRate(verticalChangeRate);
+        finalResult.setWindowStability(windowStability);
+        return finalResult;
     }
 
     /**
@@ -214,9 +233,20 @@ public class DisplacementCleaner {
         double horizontalChangeRate = 0.0;
         double verticalChangeRate = 0.0;
         double windowStability = 0.0;
+        double solutionQuality = computeSolutionQuality(result);
+
+        horizontalChangeRate = computeHorizontalChangeRate(result, state);
+        verticalChangeRate = computeVerticalChangeRate(result, state);
+        timeSeriesResidual = computeTimeSeriesResidual(result, state);
+        windowStability = computeWindowStability(state);
 
         CleanResult r1 = layer1QualityGate(result);
         if (!r1.isPassed()) {
+            r1.setTimeSeriesResidual(timeSeriesResidual);
+            r1.setSolutionQuality(solutionQuality);
+            r1.setHorizontalChangeRate(horizontalChangeRate);
+            r1.setVerticalChangeRate(verticalChangeRate);
+            r1.setWindowStability(windowStability);
             return r1;
         }
 
@@ -224,10 +254,6 @@ public class DisplacementCleaner {
         if (!r2.isPassed()) {
             stepFlag = 1.0;
         }
-        horizontalChangeRate = computeHorizontalChangeRate(result, state);
-        verticalChangeRate = computeVerticalChangeRate(result, state);
-
-        timeSeriesResidual = computeTimeSeriesResidual(result, state);
 
         CleanResult r3 = layer3StatisticalOutlier(result, state);
         if (!r3.isPassed()) {
@@ -242,7 +268,6 @@ public class DisplacementCleaner {
         updateWindows(result, state);
         result.setCleaned(true);
 
-        double solutionQuality = computeSolutionQuality(result);
         windowStability = computeWindowStability(state);
 
         CleanResult finalResult;
@@ -1022,14 +1047,17 @@ public class DisplacementCleaner {
         }
 
         boolean isFix = result.getStatus() == SolutionStatus.FIX;
+        boolean isFloat = result.getStatus() == SolutionStatus.FLOAT;
 
-        double ratioNorm = isFix ? Math.min(result.getRatio() / 10.0, 1.0) : 0.5;
+        double ratioNorm = isFix ? Math.min(result.getRatio() / 10.0, 1.0) : 0.3;
         double rmsNorm = Math.max(1.0 - result.getRms() / 0.1, 0.0);
         double pdopNorm = Math.max(1.0 - result.getPdop() / 6.0, 0.0);
         double satNorm = Math.min((double) result.getNumSatellites() / 15.0, 1.0);
 
         double quality = (ratioNorm + rmsNorm + pdopNorm + satNorm) / 4.0;
-        if (!isFix) {
+        if (isFloat) {
+            quality *= 0.5;
+        } else if (!isFix) {
             quality *= 0.7;
         }
         return Math.min(quality, 1.0);

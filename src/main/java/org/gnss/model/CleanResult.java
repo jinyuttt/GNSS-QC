@@ -50,8 +50,8 @@ public class CleanResult {
     /** 空间残差（Layer6与组中位数偏差，米），默认：0.0 */
     private double spatialResidual;
 
-    /** 解算质量归一化值（0~1，1=最优），默认：1.0 */
-    private double solutionQuality = 1.0;
+    /** 解算质量归一化值（0~1，1=最优），默认：0.0 */
+    private double solutionQuality;
 
     /** 阶跃标记（0或1，1=检测到跳变/阶跃），默认：0.0 */
     private double stepFlag;
@@ -62,8 +62,8 @@ public class CleanResult {
     /** 垂直变化率（Layer2，当前vs上一合法值，米/历元），默认：0.0 */
     private double verticalChangeRate;
 
-    /** 同向邻居占比（Layer6，组内同向运动的邻居比例，0~1，无空间校验则置1），默认：1.0 */
-    private double sameDirectionNeighborRatio = 1.0;
+    /** 同向邻居占比（Layer6，组内同向运动的邻居比例，0~1，无空间校验则置0），默认：0.0 */
+    private double sameDirectionNeighborRatio;
 
     /** 窗口稳定度（历史40条max-min，米），默认：0.0 */
     private double windowStability;

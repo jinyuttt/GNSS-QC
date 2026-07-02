@@ -117,7 +117,7 @@ class RRCFModel:
 
         score = 2.0 ** (-avg_depth / avg_len)
 
-        if self._score_threshold > 0:
+        if self._score_threshold > 0 and len(self._score_history) >= 50:
             score = min(score / self._score_threshold, 1.0)
 
         return float(score)
@@ -151,7 +151,7 @@ class RRCFModel:
     def _update_threshold(self):
         """根据历史分数分布动态调整阈值"""
         if len(self._score_history) < 50:
-            self._score_threshold = 0.5
+            self._score_threshold = 0.0
             return
         scores = np.array(self._score_history[-200:])
         self._score_threshold = float(np.percentile(scores, 90))

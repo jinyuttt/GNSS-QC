@@ -132,7 +132,7 @@ class InferenceEngine:
         lstm_class = lstm_result['class_name']
         lstm_conf = lstm_result['confidence']
 
-        rrcf_anomaly = rrcf_score > 0.5
+        rrcf_anomaly = rrcf_score >= 0.5
         lstm_pseudo = lstm_class == 'PSEUDO_DEFORMATION'
         lstm_real = lstm_class == 'REAL_DEFORMATION'
 
