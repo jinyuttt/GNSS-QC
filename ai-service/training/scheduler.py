@@ -313,6 +313,7 @@ class IncrementalTrainer:
         try:
             X = self._build_lstm_windows(samples)
             y = self._auto_label(samples)
+            X, y = self._balance_sample(X, y)
 
             loss = self.lstm.train_step(X, y, learning_rate=0.0001)
             print(f"[Trainer] LSTM fine-tuned, loss={loss:.4f}")
@@ -334,21 +335,41 @@ class IncrementalTrainer:
         return np.array(windows, dtype=np.float32)
 
     def _auto_label(self, samples: list) -> np.ndarray:
-        """自动标注：基于RRCF分数 + 时序残差"""
+        """自动标注：基于质量分数(f9) + 时序残差(f6)联合判断"""
         ws = self.lstm.window_size
         labels = []
         for i in range(ws, len(samples)):
             s = samples[i]
             f6 = abs(s.get('f6_temporal_residual', 0))
-            if f6 > 3.0:
-                labels.append(1)  # 伪形变
-            elif f6 > 2.0:
-                labels.append(2)  # 真实形变
+            quality = s.get('f9_quality_score', 1.0)
+            if quality < 0.5 and f6 > 2.0:
+                labels.append(1)
+            elif quality >= 0.8 and f6 > 2.0:
+                labels.append(2)
             else:
-                labels.append(0)  # 正常
+                labels.append(0)
         if not labels:
             return np.zeros(1, dtype=np.int64)
         return np.array(labels, dtype=np.int64)
+
+    def _balance_sample(self, X: np.ndarray, y: np.ndarray):
+        """类别平衡采样：对少数类过采样，使各类样本数接近"""
+        unique, counts = np.unique(y, return_counts=True)
+        if len(unique) <= 1:
+            return X, y
+        max_count = int(counts.max())
+        X_list, y_list = [X], [y]
+        for cls, cnt in zip(unique, counts):
+            if cnt < max_count:
+                idx = np.where(y == cls)[0]
+                oversample_n = max_count - int(cnt)
+                oversample_idx = np.random.choice(idx, size=oversample_n, replace=True)
+                X_list.append(X[oversample_idx])
+                y_list.append(y[oversample_idx])
+        X_balanced = np.concatenate(X_list, axis=0)
+        y_balanced = np.concatenate(y_list, axis=0)
+        perm = np.random.permutation(len(y_balanced))
+        return X_balanced[perm], y_balanced[perm]
 
     def get_stats(self) -> Dict:
         return {
