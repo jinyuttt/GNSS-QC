@@ -28,6 +28,8 @@ public class DisplacementResult {
 
     /** 残差RMS（米），默认：0.0 */
     private double rms;
+    /** 三维RMS（米），RMS3D = sqrt(sdn^2 + sde^2 + sdu^2)，默认：0.0 */
+    private double rms3d;
 
     /** 位置精度因子PDOP，默认：0.0 */
     private double pdop;
@@ -113,6 +115,13 @@ public class DisplacementResult {
 
     public void setRms(double rms) {
         this.rms = rms;
+    }
+    public double getRms3d() {
+        return rms3d;
+    }
+
+    public void setRms3d(double rms3d) {
+        this.rms3d = rms3d;
     }
 
     public double getPdop() {

@@ -23,11 +23,23 @@ public class CleanConfig {
     /** 最大RMS（FLOAT解，米），默认：0.15 */
     public double maxRmsFloat = 0.15;
 
+    /** 最大三维RMS（FLOAT解，米），RMS3D = sqrt(sdn^2+sde^2+sdu^2)，默认：0.25 */
+    public double maxRms3dFloat = 0.25;
+
+    /** 最大三维RMS（FIX解，米），默认：0.08 */
+    public double maxRms3d = 0.08;
+
     /** 最小Ratio（FIX解），默认：3.0 */
     public double minRatio = 3.0;
 
+    /** 最小Ratio（FLOAT解），FLOAT解ratio低于此值视为模糊度未收敛，默认：1.5 */
+    public double minRatioFloat = 1.5;
+
     /** 最大位移阈值（米），N/E/U任一分量绝对值超过此值直接拒绝，默认：2000 */
     public double maxDisplacement = 2000;
+
+    /** 是否使用三维RMS替代单分量RMS进行质量门控，默认：true */
+    public boolean useRms3d = true;
 
     // ========== 第二层：相邻跳变检测 ==========
 

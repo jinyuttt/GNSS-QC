@@ -350,10 +350,19 @@ public class DisplacementCleaner {
                 result.setAbnormalReason("Layer1: FLOAT PDOP > " + config.maxPdopFloat);
                 return CleanResult.fail(result, 1, "FLOAT PDOP too high");
             }
-            if (result.getRms() > config.maxRmsFloat) {
+            double effectiveRms = config.useRms3d && result.getRms3d() > 0
+                    ? result.getRms3d() : result.getRms();
+            double effectiveThreshold = config.useRms3d && result.getRms3d() > 0
+                    ? config.maxRms3dFloat : config.maxRmsFloat;
+            if (effectiveRms > effectiveThreshold) {
                 result.setAbnormal(true);
-                result.setAbnormalReason("Layer1: FLOAT RMS > " + config.maxRmsFloat);
+                result.setAbnormalReason(String.format("Layer1: FLOAT RMS(%.4f) > %.4f", effectiveRms, effectiveThreshold));
                 return CleanResult.fail(result, 1, "FLOAT RMS too high");
+            }
+            if (result.getRatio() > 0 && result.getRatio() < config.minRatioFloat) {
+                result.setAbnormal(true);
+                result.setAbnormalReason("Layer1: FLOAT ratio < " + config.minRatioFloat);
+                return CleanResult.fail(result, 1, "FLOAT ratio too low");
             }
         }
 
@@ -368,9 +377,13 @@ public class DisplacementCleaner {
                 result.setAbnormalReason("Layer1: FIX PDOP > " + config.maxPdop);
                 return CleanResult.fail(result, 1, "FIX PDOP too high");
             }
-            if (result.getRms() > config.maxRms) {
+            double effectiveRmsFix = config.useRms3d && result.getRms3d() > 0
+                    ? result.getRms3d() : result.getRms();
+            double effectiveThresholdFix = config.useRms3d && result.getRms3d() > 0
+                    ? config.maxRms3d : config.maxRms;
+            if (effectiveRmsFix > effectiveThresholdFix) {
                 result.setAbnormal(true);
-                result.setAbnormalReason("Layer1: FIX RMS > " + config.maxRms);
+                result.setAbnormalReason(String.format("Layer1: FIX RMS(%.4f) > %.4f", effectiveRmsFix, effectiveThresholdFix));
                 return CleanResult.fail(result, 1, "FIX RMS too high");
             }
             if (result.getRatio() < config.minRatio) {
@@ -1050,7 +1063,8 @@ public class DisplacementCleaner {
         boolean isFloat = result.getStatus() == SolutionStatus.FLOAT;
 
         double ratioNorm = isFix ? Math.min(result.getRatio() / 10.0, 1.0) : 0.3;
-        double rmsNorm = Math.max(1.0 - result.getRms() / 0.1, 0.0);
+        double effectiveRmsForQuality = config.useRms3d && result.getRms3d() > 0 ? result.getRms3d() : result.getRms();
+        double rmsNorm = Math.max(1.0 - effectiveRmsForQuality / 0.1, 0.0);
         double pdopNorm = Math.max(1.0 - result.getPdop() / 6.0, 0.0);
         double satNorm = Math.min((double) result.getNumSatellites() / 15.0, 1.0);
 

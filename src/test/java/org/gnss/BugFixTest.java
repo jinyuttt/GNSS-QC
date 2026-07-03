@@ -459,4 +459,88 @@ class BugFixTest {
 
         System.out.println("  [PASS] 超容量时淘汰最久未更新设备");
     }
+
+    // ==================== 修复9: RMS3D三维RMS质量门控 ====================
+
+    @Test
+    @Order(80)
+    @DisplayName("BugFix9: FLOAT解应使用3D-RMS进行质量门控")
+    void testFloat3dRmsQualityGate() {
+        CleanConfig config = new CleanConfig();
+        config.useRms3d = true;
+        CacheConfig cacheConfig = new CacheConfig();
+        PersistenceConfig persistConfig = new PersistenceConfig();
+        DeviceStateCache cache = new DeviceStateCache(cacheConfig, persistConfig, h2);
+        DisplacementCleaner cleaner = new DisplacementCleaner(config, cache);
+
+        DisplacementResult result = new DisplacementResult();
+        result.setdNorth(0.007);
+        result.setdEast(0.095);
+        result.setdUp(0.230);
+        result.setStatus(SolutionStatus.FLOAT);
+        result.setRatio(1.1);
+        result.setRms(0.02);
+        result.setRms3d(0.247);
+        result.setPdop(2.5);
+        result.setNumSatellites(13);
+
+        CleanResult cr = cleaner.cleanSingle(result);
+        assertFalse(cr.isPassed(), "FLOAT解3D-RMS=0.247 > maxRms3dFloat(0.25) 应被拒绝");
+        assertEquals(1, cr.getFailureLayer());
+        System.out.println("  [PASS] FLOAT 3D-RMS质量门控生效");
+    }
+
+    @Test
+    @Order(81)
+    @DisplayName("BugFix10: FLOAT解ratio过低应被拒绝")
+    void testFloatLowRatioRejected() {
+        CleanConfig config = new CleanConfig();
+        config.minRatioFloat = 1.5;
+        CacheConfig cacheConfig = new CacheConfig();
+        PersistenceConfig persistConfig = new PersistenceConfig();
+        DeviceStateCache cache = new DeviceStateCache(cacheConfig, persistConfig, h2);
+        DisplacementCleaner cleaner = new DisplacementCleaner(config, cache);
+
+        DisplacementResult result = new DisplacementResult();
+        result.setdNorth(0.001);
+        result.setdEast(0.002);
+        result.setdUp(0.003);
+        result.setStatus(SolutionStatus.FLOAT);
+        result.setRatio(1.05);
+        result.setRms(0.01);
+        result.setPdop(2.0);
+        result.setNumSatellites(12);
+
+        CleanResult cr = cleaner.cleanSingle(result);
+        assertFalse(cr.isPassed(), "FLOAT ratio=1.05 < minRatioFloat(1.5) 应被拒绝");
+        assertEquals(1, cr.getFailureLayer());
+        System.out.println("  [PASS] FLOAT ratio检查生效");
+    }
+
+    @Test
+    @Order(82)
+    @DisplayName("BugFix11: rms3d为0时应回退到单分量rms")
+    void testFallbackToSingleRms() {
+        CleanConfig config = new CleanConfig();
+        config.useRms3d = true;
+        CacheConfig cacheConfig = new CacheConfig();
+        PersistenceConfig persistConfig = new PersistenceConfig();
+        DeviceStateCache cache = new DeviceStateCache(cacheConfig, persistConfig, h2);
+        DisplacementCleaner cleaner = new DisplacementCleaner(config, cache);
+
+        DisplacementResult result = new DisplacementResult();
+        result.setdNorth(0.010);
+        result.setdEast(0.005);
+        result.setdUp(0.003);
+        result.setStatus(SolutionStatus.FLOAT);
+        result.setRatio(2.0);
+        result.setRms(0.20);
+        result.setRms3d(0.0);
+        result.setPdop(3.0);
+        result.setNumSatellites(10);
+
+        CleanResult cr = cleaner.cleanSingle(result);
+        assertFalse(cr.isPassed(), "rms3d=0时回退到rms=0.20 > maxRmsFloat(0.15) 应被拒绝");
+        System.out.println("  [PASS] rms3d=0回退到单分量rms");
+    }
 }
