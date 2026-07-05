@@ -118,7 +118,12 @@ class RRCFModel:
         score = 2.0 ** (-avg_depth / avg_len)
 
         if self._score_threshold > 0 and len(self._score_history) >= 50:
-            score = min(score / self._score_threshold, 1.0)
+            _t = self._score_threshold
+            _norm_t = 0.5
+            if score <= _t:
+                score = (score / _t) * _norm_t
+            else:
+                score = _norm_t + (1.0 - _norm_t) * (1.0 - _t / score)
 
         return float(score)
 

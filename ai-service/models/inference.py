@@ -61,6 +61,7 @@ class InferenceEngine:
     def infer_single(self, station_id: str, features: Dict) -> Dict:
         t0 = time.time()
 
+        self.rrcf.update([features])
         rrcf_score = self.rrcf.score(features)
         lstm_result = self.lstm.predict(station_id, features)
 
@@ -81,6 +82,7 @@ class InferenceEngine:
                     features_list: List[Dict]) -> List[Dict]:
         t0 = time.time()
 
+        self.rrcf.update(features_list)
         rrcf_scores = self.rrcf.score_batch(features_list)
         lstm_results = self.lstm.predict_batch(station_ids, features_list)
 
