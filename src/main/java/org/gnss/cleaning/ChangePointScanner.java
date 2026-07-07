@@ -126,7 +126,7 @@ public class ChangePointScanner {
 
     private int pettittTest(double[] data) {
         int n = data.length;
-        if (n < 10) return -1;
+        if (n < 30) return -1;
 
         double[] ranks = computeAverageRanks(data);
 
@@ -143,8 +143,15 @@ public class ChangePointScanner {
             }
         }
 
-        double pValue = 2.0 * Math.exp(-6.0 * maxU * maxU / (n * n * (n + 1)));
+        if (maxU == 0) return -1;
+
+        double denominator = (double) n * n * n + (double) n * n;
+        double exponent = -6.0 * maxU * maxU / denominator;
+        double pValue = 2.0 * Math.exp(exponent);
+
+        if (pValue < 0.0) pValue = 0.0;
         if (pValue > 1.0) pValue = 1.0;
+
         if (pValue < 0.05) {
             return changePoint;
         }
