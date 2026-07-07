@@ -57,6 +57,9 @@ public class DisplacementResult {
 
     /** 设备诊断信息（可选），默认：null */
     private DeviceDiagnosis diagnosis;
+    private Double denoisedNorth;
+    private Double denoisedEast;
+    private Double denoisedUp;
 
     public DisplacementResult() {
     }
@@ -195,4 +198,13 @@ public class DisplacementResult {
     public void setDiagnosis(DeviceDiagnosis diagnosis) {
         this.diagnosis = diagnosis;
     }
+
+    public Double getDenoisedNorth() { return denoisedNorth; }
+    public void setDenoisedNorth(Double denoisedNorth) { this.denoisedNorth = denoisedNorth; }
+
+    public Double getDenoisedEast() { return denoisedEast; }
+    public void setDenoisedEast(Double denoisedEast) { this.denoisedEast = denoisedEast; }
+
+    public Double getDenoisedUp() { return denoisedUp; }
+    public void setDenoisedUp(Double denoisedUp) { this.denoisedUp = denoisedUp; }
 }

@@ -232,7 +232,7 @@ class CleaningPipelineTest {
         assertEquals(1, cr6.getFailureLayer());
 
         printSubHeader("Case 7: FIX low satellites -> L1 reject");
-        DisplacementResult lowSat = makeFixResult(0.010, 0.005, 0.003, 5.0, 0.020, 2.0, 4);
+        DisplacementResult lowSat = makeFixResult(0.010, 0.005, 0.003, 5.0, 0.020, 2.0, 3);
         printInput(++seq, lowSat);
         CleanResult cr7 = cleaner.cleanSingle(lowSat);
         printOutput(cr7);

@@ -11,7 +11,7 @@ public class Layer7Config {
     /** 是否启用第七层综合仲裁，默认：false */
     public boolean enabled = false;
 
-    /** 是否启用影子评测支路（需第七层启用后才生效），默认：false */
+    /** 是否启用影子评测旁路（需第七层启用后才生效），默认：false */
     public boolean enableShadowBranch = false;
 
     // ========== 历史数据查询 ==========
@@ -30,7 +30,7 @@ public class Layer7Config {
     /** 斜率绝对值 < 此值视为无趋势，默认：0.001 */
     public double trendThreshold = 0.001;
 
-    /** 偏离度阈值 = N × MAD，默认：3.0 */
+    /** 偏离阈值 = N × MAD，默认：3.0 */
     public double deviationMultiplier = 3.0;
 
     // ========== 加权综合异常分（WCS） ==========
@@ -81,6 +81,29 @@ public class Layer7Config {
 
     /** 影子评测超长异常区间不生成修正值（历元数），默认：20 */
     public int shadowMaxContinuousErr = 20;
+
+    // ========== 异步变点检测旁路 ==========
+
+    /** 是否启用异步变点检测，默认：false */
+    public boolean changePointDetectionEnabled = false;
+
+    /** 变点检测触发间隔（分钟），默认：30 */
+    public int changePointScanIntervalMinutes = 30;
+
+    /** 变点检测回看窗口（历元数），默认：60 */
+    public int changePointScanWindowSize = 60;
+
+    /** 窗口内最少有效点数，默认：30 */
+    public int changePointMinPoints = 30;
+
+    /** 变点前后均值差阈值（米），默认：0.03 */
+    public double changePointMinShift = 0.03;
+
+    /** 是否自动应用修正，默认：false */
+    public boolean changePointAutoApply = false;
+
+    /** 检测到变点时是否发送告警，默认：true */
+    public boolean changePointAlert = true;
 
     public Layer7Config() {
     }

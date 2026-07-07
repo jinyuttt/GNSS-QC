@@ -46,4 +46,12 @@ public interface HistoryDataProvider {
      * @return true=可用
      */
     boolean isAvailable();
+
+    default List<String> getActiveStationIds() {
+        return java.util.List.of();
+    }
+
+    default List<org.gnss.model.DisplacementResult> queryRecent(String stationId, int windowSize) {
+        return java.util.List.of();
+    }
 }

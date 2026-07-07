@@ -133,227 +133,162 @@ public class DeviceState {
     /** 连续同向起始时间戳（毫秒），默认：0 */
     private long consecutiveSameDirectionStartTime;
 
+    // ========== L0 小波去噪环形缓冲 ==========
+
+    /** L0 N方向环形缓冲，默认：空 */
+    private double[] waveletBufferN;
+
+    /** L0 E方向环形缓冲，默认：空 */
+    private double[] waveletBufferE;
+
+    /** L0 U方向环形缓冲，默认：空 */
+    private double[] waveletBufferU;
+
+    /** L0 环形缓冲写入位置，默认：0 */
+    private int waveletBufferPos;
+
+    /** L0 环形缓冲已填充数量，默认：0 */
+    private int waveletBufferFilled;
+
+    /** L0 窗口大小，默认：0（未初始化） */
+    private int waveletWindowSize;
+
+    /** L0 上次去噪结果N，默认：null（未计算） */
+    private Double denoisedNorth;
+
+    /** L0 上次去噪结果E，默认：null（未计算） */
+    private Double denoisedEast;
+
+    /** L0 上次去噪结果U，默认：null（未计算） */
+    private Double denoisedUp;
+
+    // ========== L2 CUSUM 累加器 ==========
+
+    /** CUSUM 正向累加器N，默认：0.0 */
+    private double cusumPlusN;
+
+    /** CUSUM 负向累加器N，默认：0.0 */
+    private double cusumMinusN;
+
+    /** CUSUM 正向累加器E，默认：0.0 */
+    private double cusumPlusE;
+
+    /** CUSUM 负向累加器E，默认：0.0 */
+    private double cusumMinusE;
+
+    /** CUSUM 正向累加器U，默认：0.0 */
+    private double cusumPlusU;
+
+    /** CUSUM 负向累加器U，默认：0.0 */
+    private double cusumMinusU;
+
+    /** CUSUM 漂移标记，默认：false */
+    private boolean driftSuspicion;
+
+    // ========== L5 LOESS 缓存 ==========
+
+    /** LOESS慢基线N缓存，默认：null（未计算） */
+    private Double loessSlowBaselineNorth;
+
+    /** LOESS慢基线E缓存，默认：null（未计算） */
+    private Double loessSlowBaselineEast;
+
+    /** LOESS慢基线U缓存，默认：null（未计算） */
+    private Double loessSlowBaselineUp;
+
+    /** LOESS上次重算时的历元计数，默认：0 */
+    private int loessLastRecalcEpoch;
+
+    // ========== L4 连续粗差跟踪 ==========
+
+    /** 连续粗差计数，默认：0 */
+    private int consecutiveOutlierCount;
+
+    /** 连续粗差起始索引（在清洗批次中），默认：-1 */
+    private int consecutiveOutlierStart;
+
     public DeviceState() {
     }
 
-    public LinkedList<Double> getNorthWindow() {
-        return northWindow;
-    }
+    // ==================== 原有 getter/setter ====================
 
-    public LinkedList<Double> getEastWindow() {
-        return eastWindow;
-    }
+    public LinkedList<Double> getNorthWindow() { return northWindow; }
+    public LinkedList<Double> getEastWindow() { return eastWindow; }
+    public LinkedList<Double> getUpWindow() { return upWindow; }
 
-    public LinkedList<Double> getUpWindow() {
-        return upWindow;
-    }
+    public double getLastValidNorth() { return lastValidNorth; }
+    public void setLastValidNorth(double lastValidNorth) { this.lastValidNorth = lastValidNorth; }
 
-    public double getLastValidNorth() {
-        return lastValidNorth;
-    }
+    public double getLastValidEast() { return lastValidEast; }
+    public void setLastValidEast(double lastValidEast) { this.lastValidEast = lastValidEast; }
 
-    public void setLastValidNorth(double lastValidNorth) {
-        this.lastValidNorth = lastValidNorth;
-    }
+    public double getLastValidUp() { return lastValidUp; }
+    public void setLastValidUp(double lastValidUp) { this.lastValidUp = lastValidUp; }
 
-    public double getLastValidEast() {
-        return lastValidEast;
-    }
+    public double getPrevValidNorth() { return prevValidNorth; }
+    public void setPrevValidNorth(double prevValidNorth) { this.prevValidNorth = prevValidNorth; }
 
-    public void setLastValidEast(double lastValidEast) {
-        this.lastValidEast = lastValidEast;
-    }
+    public double getPrevValidEast() { return prevValidEast; }
+    public void setPrevValidEast(double prevValidEast) { this.prevValidEast = prevValidEast; }
 
-    public double getLastValidUp() {
-        return lastValidUp;
-    }
+    public double getPrevValidUp() { return prevValidUp; }
+    public void setPrevValidUp(double prevValidUp) { this.prevValidUp = prevValidUp; }
 
-    public void setLastValidUp(double lastValidUp) {
-        this.lastValidUp = lastValidUp;
-    }
+    public LinkedList<Double> getFastBaselineNorth() { return fastBaselineNorth; }
+    public LinkedList<Double> getFastBaselineEast() { return fastBaselineEast; }
+    public LinkedList<Double> getFastBaselineUp() { return fastBaselineUp; }
 
-    public double getPrevValidNorth() {
-        return prevValidNorth;
-    }
+    public LinkedList<Double> getSlowBaselineNorth() { return slowBaselineNorth; }
+    public LinkedList<Double> getSlowBaselineEast() { return slowBaselineEast; }
+    public LinkedList<Double> getSlowBaselineUp() { return slowBaselineUp; }
 
-    public void setPrevValidNorth(double prevValidNorth) {
-        this.prevValidNorth = prevValidNorth;
-    }
+    public List<DisplacementResult> getDownsampledHistory() { return downsampledHistory; }
+    public int getDownsampledHistoryCapacity() { return downsampledHistoryCapacity; }
+    public void setDownsampledHistoryCapacity(int cap) { this.downsampledHistoryCapacity = cap; }
 
-    public double getPrevValidEast() {
-        return prevValidEast;
-    }
+    public double getLastTemperature() { return lastTemperature; }
+    public void setLastTemperature(double t) { this.lastTemperature = t; }
 
-    public void setPrevValidEast(double prevValidEast) {
-        this.prevValidEast = prevValidEast;
-    }
+    public boolean isDenseRecordActive() { return denseRecordActive; }
+    public void setDenseRecordActive(boolean a) { this.denseRecordActive = a; }
 
-    public double getPrevValidUp() {
-        return prevValidUp;
-    }
+    public List<String> getAnomalyEventLog() { return anomalyEventLog; }
+    public int getAnomalyEventLogCapacity() { return anomalyEventLogCapacity; }
+    public void setAnomalyEventLogCapacity(int cap) { this.anomalyEventLogCapacity = cap; }
 
-    public void setPrevValidUp(double prevValidUp) {
-        this.prevValidUp = prevValidUp;
-    }
+    public long getLastUpdateTime() { return lastUpdateTime; }
+    public void setLastUpdateTime(long t) { this.lastUpdateTime = t; }
 
-    public LinkedList<Double> getFastBaselineNorth() {
-        return fastBaselineNorth;
-    }
+    public DeviceDiagnosis getLastDiagnosis() { return lastDiagnosis; }
+    public void setLastDiagnosis(DeviceDiagnosis d) { this.lastDiagnosis = d; }
 
-    public LinkedList<Double> getFastBaselineEast() {
-        return fastBaselineEast;
-    }
-
-    public LinkedList<Double> getFastBaselineUp() {
-        return fastBaselineUp;
-    }
-
-    public LinkedList<Double> getSlowBaselineNorth() {
-        return slowBaselineNorth;
-    }
-
-    public LinkedList<Double> getSlowBaselineEast() {
-        return slowBaselineEast;
-    }
-
-    public LinkedList<Double> getSlowBaselineUp() {
-        return slowBaselineUp;
-    }
-
-    public List<DisplacementResult> getDownsampledHistory() {
-        return downsampledHistory;
-    }
-
-    public int getDownsampledHistoryCapacity() {
-        return downsampledHistoryCapacity;
-    }
-
-    public void setDownsampledHistoryCapacity(int downsampledHistoryCapacity) {
-        this.downsampledHistoryCapacity = downsampledHistoryCapacity;
-    }
-
-    public double getLastTemperature() {
-        return lastTemperature;
-    }
-
-    public void setLastTemperature(double lastTemperature) {
-        this.lastTemperature = lastTemperature;
-    }
-
-    public boolean isDenseRecordActive() {
-        return denseRecordActive;
-    }
-
-    public void setDenseRecordActive(boolean denseRecordActive) {
-        this.denseRecordActive = denseRecordActive;
-    }
-
-    public List<String> getAnomalyEventLog() {
-        return anomalyEventLog;
-    }
-
-    public int getAnomalyEventLogCapacity() {
-        return anomalyEventLogCapacity;
-    }
-
-    public void setAnomalyEventLogCapacity(int anomalyEventLogCapacity) {
-        this.anomalyEventLogCapacity = anomalyEventLogCapacity;
-    }
-
-    public long getLastUpdateTime() {
-        return lastUpdateTime;
-    }
-
-    public void setLastUpdateTime(long lastUpdateTime) {
-        this.lastUpdateTime = lastUpdateTime;
-    }
-
-    public DeviceDiagnosis getLastDiagnosis() {
-        return lastDiagnosis;
-    }
-
-    public void setLastDiagnosis(DeviceDiagnosis lastDiagnosis) {
-        this.lastDiagnosis = lastDiagnosis;
-    }
-
-    public boolean isLastValidInitialized() {
-        return lastValidInitialized;
-    }
-
-    public void setLastValidInitialized(boolean lastValidInitialized) {
-        this.lastValidInitialized = lastValidInitialized;
-    }
+    public boolean isLastValidInitialized() { return lastValidInitialized; }
+    public void setLastValidInitialized(boolean v) { this.lastValidInitialized = v; }
 
     // ========== 第五层阶跃观察状态 getter/setter ==========
 
-    public int getStepObservationCount() {
-        return stepObservationCount;
-    }
+    public int getStepObservationCount() { return stepObservationCount; }
+    public void setStepObservationCount(int c) { this.stepObservationCount = c; }
 
-    public void setStepObservationCount(int stepObservationCount) {
-        this.stepObservationCount = stepObservationCount;
-    }
+    public double getStepCandidateNorth() { return stepCandidateNorth; }
+    public void setStepCandidateNorth(double v) { this.stepCandidateNorth = v; }
 
-    public double getStepCandidateNorth() {
-        return stepCandidateNorth;
-    }
+    public double getStepCandidateEast() { return stepCandidateEast; }
+    public void setStepCandidateEast(double v) { this.stepCandidateEast = v; }
 
-    public void setStepCandidateNorth(double stepCandidateNorth) {
-        this.stepCandidateNorth = stepCandidateNorth;
-    }
+    public double getStepCandidateUp() { return stepCandidateUp; }
+    public void setStepCandidateUp(double v) { this.stepCandidateUp = v; }
 
-    public double getStepCandidateEast() {
-        return stepCandidateEast;
-    }
+    public long getStepStartTime() { return stepStartTime; }
+    public void setStepStartTime(long t) { this.stepStartTime = t; }
 
-    public void setStepCandidateEast(double stepCandidateEast) {
-        this.stepCandidateEast = stepCandidateEast;
-    }
+    public double getInitialBaselineNorth() { return initialBaselineNorth; }
+    public double getInitialBaselineEast() { return initialBaselineEast; }
+    public double getInitialBaselineUp() { return initialBaselineUp; }
+    public boolean isInitialBaselineEstablished() { return initialBaselineEstablished; }
 
-    public double getStepCandidateUp() {
-        return stepCandidateUp;
-    }
-
-    public void setStepCandidateUp(double stepCandidateUp) {
-        this.stepCandidateUp = stepCandidateUp;
-    }
-
-    public long getStepStartTime() {
-        return stepStartTime;
-    }
-
-    public void setStepStartTime(long stepStartTime) {
-        this.stepStartTime = stepStartTime;
-    }
-
-    public double getInitialBaselineNorth() {
-        return initialBaselineNorth;
-    }
-
-    public double getInitialBaselineEast() {
-        return initialBaselineEast;
-    }
-
-    public double getInitialBaselineUp() {
-        return initialBaselineUp;
-    }
-
-    public boolean isInitialBaselineEstablished() {
-        return initialBaselineEstablished;
-    }
-
-    /**
-     * 累积初始基线（前10个FIX解）
-     * <p>累积满10个后自动计算均值并标记基线已建立</p>
-     *
-     * @param north 北向位移
-     * @param east  东向位移
-     * @param up    天向位移
-     */
     public void accumulateInitialBaseline(double north, double east, double up) {
-        if (initialBaselineEstablished) {
-            return;
-        }
+        if (initialBaselineEstablished) return;
         initialBaselineNorthSum += north;
         initialBaselineEastSum += east;
         initialBaselineUpSum += up;
@@ -368,57 +303,24 @@ public class DeviceState {
 
     // ========== 跳变方向历史记录 getter/setter ==========
 
-    public LinkedList<DirectionRecord> getJumpDirectionHistory() {
-        return jumpDirectionHistory;
-    }
+    public LinkedList<DirectionRecord> getJumpDirectionHistory() { return jumpDirectionHistory; }
+    public int getConsecutiveSameDirectionCount() { return consecutiveSameDirectionCount; }
+    public long getConsecutiveSameDirectionStartTime() { return consecutiveSameDirectionStartTime; }
 
-    public int getConsecutiveSameDirectionCount() {
-        return consecutiveSameDirectionCount;
-    }
-
-    public long getConsecutiveSameDirectionStartTime() {
-        return consecutiveSameDirectionStartTime;
-    }
-
-    /**
-     * 记录当前历元的跳变方向
-     *
-     * @param signN          北向跳变方向符号（+1/-1/0）
-     * @param signE          东向跳变方向符号（+1/-1/0）
-     * @param signU          天向跳变方向符号（+1/-1/0）
-     * @param maxHistorySize 历史记录最大容量（建议设为 trendQuickReleaseCount * 2）
-     */
     public void recordJumpDirection(double signN, double signE, double signU, int maxHistorySize) {
-        DirectionRecord rec = new DirectionRecord(
-                System.currentTimeMillis(),
-                signN,
-                signE,
-                signU
-        );
+        DirectionRecord rec = new DirectionRecord(System.currentTimeMillis(), signN, signE, signU);
         jumpDirectionHistory.addLast(rec);
-        while (jumpDirectionHistory.size() > maxHistorySize) {
-            jumpDirectionHistory.removeFirst();
-        }
+        while (jumpDirectionHistory.size() > maxHistorySize) jumpDirectionHistory.removeFirst();
     }
 
-    /**
-     * 重置连续同向趋势计数（跳变链中断时调用）
-     */
     public void resetConsecutiveSameDirection() {
         consecutiveSameDirectionCount = 0;
         consecutiveSameDirectionStartTime = 0;
     }
 
-    /**
-     * 更新连续同向趋势计数
-     *
-     * @param sameDirection 当前历元是否与历史同向
-     */
     public void updateConsecutiveSameDirection(boolean sameDirection) {
         if (sameDirection) {
-            if (consecutiveSameDirectionCount == 0) {
-                consecutiveSameDirectionStartTime = System.currentTimeMillis();
-            }
+            if (consecutiveSameDirectionCount == 0) consecutiveSameDirectionStartTime = System.currentTimeMillis();
             consecutiveSameDirectionCount++;
         } else {
             consecutiveSameDirectionCount = 0;
@@ -426,83 +328,126 @@ public class DeviceState {
         }
     }
 
+    // ========== L0 小波去噪 getter/setter ==========
+
+    public double[] getWaveletBufferN() { return waveletBufferN; }
+    public void setWaveletBufferN(double[] b) { this.waveletBufferN = b; }
+
+    public double[] getWaveletBufferE() { return waveletBufferE; }
+    public void setWaveletBufferE(double[] b) { this.waveletBufferE = b; }
+
+    public double[] getWaveletBufferU() { return waveletBufferU; }
+    public void setWaveletBufferU(double[] b) { this.waveletBufferU = b; }
+
+    public int getWaveletBufferPos() { return waveletBufferPos; }
+    public void setWaveletBufferPos(int p) { this.waveletBufferPos = p; }
+
+    public int getWaveletBufferFilled() { return waveletBufferFilled; }
+    public void setWaveletBufferFilled(int f) { this.waveletBufferFilled = f; }
+
+    public int getWaveletWindowSize() { return waveletWindowSize; }
+    public void setWaveletWindowSize(int s) { this.waveletWindowSize = s; }
+
+    public Double getDenoisedNorth() { return denoisedNorth; }
+    public void setDenoisedNorth(Double v) { this.denoisedNorth = v; }
+
+    public Double getDenoisedEast() { return denoisedEast; }
+    public void setDenoisedEast(Double v) { this.denoisedEast = v; }
+
+    public Double getDenoisedUp() { return denoisedUp; }
+    public void setDenoisedUp(Double v) { this.denoisedUp = v; }
+
+    // ========== L2 CUSUM getter/setter ==========
+
+    public double getCusumPlusN() { return cusumPlusN; }
+    public void setCusumPlusN(double v) { this.cusumPlusN = v; }
+
+    public double getCusumMinusN() { return cusumMinusN; }
+    public void setCusumMinusN(double v) { this.cusumMinusN = v; }
+
+    public double getCusumPlusE() { return cusumPlusE; }
+    public void setCusumPlusE(double v) { this.cusumPlusE = v; }
+
+    public double getCusumMinusE() { return cusumMinusE; }
+    public void setCusumMinusE(double v) { this.cusumMinusE = v; }
+
+    public double getCusumPlusU() { return cusumPlusU; }
+    public void setCusumPlusU(double v) { this.cusumPlusU = v; }
+
+    public double getCusumMinusU() { return cusumMinusU; }
+    public void setCusumMinusU(double v) { this.cusumMinusU = v; }
+
+    public boolean isDriftSuspicion() { return driftSuspicion; }
+    public void setDriftSuspicion(boolean v) { this.driftSuspicion = v; }
+
+    // ========== L5 LOESS 缓存 getter/setter ==========
+
+    public Double getLoessSlowBaselineNorth() { return loessSlowBaselineNorth; }
+    public void setLoessSlowBaselineNorth(Double v) { this.loessSlowBaselineNorth = v; }
+
+    public Double getLoessSlowBaselineEast() { return loessSlowBaselineEast; }
+    public void setLoessSlowBaselineEast(Double v) { this.loessSlowBaselineEast = v; }
+
+    public Double getLoessSlowBaselineUp() { return loessSlowBaselineUp; }
+    public void setLoessSlowBaselineUp(Double v) { this.loessSlowBaselineUp = v; }
+
+    public int getLoessLastRecalcEpoch() { return loessLastRecalcEpoch; }
+    public void setLoessLastRecalcEpoch(int e) { this.loessLastRecalcEpoch = e; }
+
+    // ========== L4 连续粗差跟踪 getter/setter ==========
+
+    public int getConsecutiveOutlierCount() { return consecutiveOutlierCount; }
+    public void setConsecutiveOutlierCount(int c) { this.consecutiveOutlierCount = c; }
+
+    public int getConsecutiveOutlierStart() { return consecutiveOutlierStart; }
+    public void setConsecutiveOutlierStart(int s) { this.consecutiveOutlierStart = s; }
+
     // ==================== 快照转换 ====================
 
-    /**
-     * 转换为持久化快照
-     * <p>将内存状态序列化为可持久化的 DeviceStateSnapshot</p>
-     *
-     * @param deviceId 设备ID
-     * @return 设备状态快照
-     */
     public DeviceStateSnapshot toSnapshot(String deviceId) {
         DeviceStateSnapshot snapshot = new DeviceStateSnapshot();
         snapshot.setDeviceId(deviceId);
         snapshot.setSnapshotTime(java.time.Instant.now());
-
-        // 上一合法值
         snapshot.setLastValidNorth(lastValidNorth);
         snapshot.setLastValidEast(lastValidEast);
         snapshot.setLastValidUp(lastValidUp);
-
-        // 双基线中位数
         snapshot.setFastBaselineNorth(median(fastBaselineNorth));
         snapshot.setFastBaselineEast(median(fastBaselineEast));
         snapshot.setFastBaselineUp(median(fastBaselineUp));
         snapshot.setSlowBaselineNorth(median(slowBaselineNorth));
         snapshot.setSlowBaselineEast(median(slowBaselineEast));
         snapshot.setSlowBaselineUp(median(slowBaselineUp));
-
-        // 温度状态
         snapshot.setLastTemperature(lastTemperature);
         snapshot.setDenseMode(denseRecordActive);
         snapshot.setDenseCounter(0);
-
-        // 阶跃观察状态
         snapshot.setStepObservationCount(stepObservationCount);
         snapshot.setStepCandidateNorth(stepCandidateNorth);
         snapshot.setStepCandidateEast(stepCandidateEast);
         snapshot.setStepCandidateUp(stepCandidateUp);
         snapshot.setStepStartTime(stepStartTime);
-
-        // 初始基线
         snapshot.setInitialBaselineEstablished(initialBaselineEstablished);
         snapshot.setInitialBaselineNorth(initialBaselineNorth);
         snapshot.setInitialBaselineEast(initialBaselineEast);
         snapshot.setInitialBaselineUp(initialBaselineUp);
         snapshot.setInitialBaselineCount(initialBaselineFixCount);
-
         return snapshot;
     }
 
     private static double median(List<Double> list) {
-        if (list == null || list.isEmpty()) {
-            return 0.0;
-        }
+        if (list == null || list.isEmpty()) return 0.0;
         List<Double> sorted = new ArrayList<>(list);
         Collections.sort(sorted);
         int size = sorted.size();
-        if (size % 2 == 1) {
-            return sorted.get(size / 2);
-        } else {
-            return (sorted.get(size / 2 - 1) + sorted.get(size / 2)) / 2.0;
-        }
+        if (size % 2 == 1) return sorted.get(size / 2);
+        return (sorted.get(size / 2 - 1) + sorted.get(size / 2)) / 2.0;
     }
 
     // ==================== DirectionRecord 内部类 ====================
 
-    /**
-     * 跳变方向记录
-     * <p>记录单个历元N/E/U三个方向的跳变方向符号，用于同向趋势判断</p>
-     */
     public static class DirectionRecord {
-        /** 时间戳（毫秒） */
         private final long timestamp;
-        /** 北向跳变方向符号（+1/-1/0） */
         private final double signN;
-        /** 东向跳变方向符号（+1/-1/0） */
         private final double signE;
-        /** 天向跳变方向符号（+1/-1/0） */
         private final double signU;
 
         public DirectionRecord(long timestamp, double signN, double signE, double signU) {
@@ -512,15 +457,6 @@ public class DeviceState {
             this.signU = signU;
         }
 
-        /**
-         * 判断三个方向是否完全同向
-         * <p>忽略零值（未变化的方向），只要非零方向同向即视为同向</p>
-         *
-         * @param otherSignN 待比较的北向符号
-         * @param otherSignE 待比较的东向符号
-         * @param otherSignU 待比较的天向符号
-         * @return true=三维同向
-         */
         public boolean isSameDirection(double otherSignN, double otherSignE, double otherSignU) {
             boolean nSame = signN == 0 || otherSignN == 0 || signN == otherSignN;
             boolean eSame = signE == 0 || otherSignE == 0 || signE == otherSignE;
@@ -528,20 +464,9 @@ public class DeviceState {
             return nSame && eSame && uSame;
         }
 
-        public long getTimestamp() {
-            return timestamp;
-        }
-
-        public double getSignN() {
-            return signN;
-        }
-
-        public double getSignE() {
-            return signE;
-        }
-
-        public double getSignU() {
-            return signU;
-        }
+        public long getTimestamp() { return timestamp; }
+        public double getSignN() { return signN; }
+        public double getSignE() { return signE; }
+        public double getSignU() { return signU; }
     }
 }

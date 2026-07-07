@@ -9,6 +9,8 @@ import org.gnss.model.DeviceState;
 import org.gnss.model.DeviceState.DirectionRecord;
 import org.gnss.model.DisplacementResult;
 import org.gnss.model.SolutionStatus;
+import org.hipparchus.analysis.interpolation.LoessInterpolator;
+import org.hipparchus.analysis.polynomials.PolynomialSplineFunction;
 
 import java.util.ArrayList;
 import java.util.Calendar;
@@ -45,6 +47,9 @@ public class DisplacementCleaner {
 
     private final CleanConfig config;
     private final DeviceStateCache cache;
+    private final WaveletDenoiser waveletDenoiser;
+    private final CusumDetector cusumDetector;
+    private int epochCounter = 0;
 
     // 动态阈值（由诊断模块反馈调整）
     private double effectiveMaxStepHorizontal;
@@ -61,6 +66,8 @@ public class DisplacementCleaner {
     public DisplacementCleaner(CleanConfig config, DeviceStateCache cache) {
         this.config = config;
         this.cache = cache;
+        this.waveletDenoiser = new WaveletDenoiser(config);
+        this.cusumDetector = new CusumDetector(config);
         restoreDefaultThresholds();
     }
 
@@ -198,6 +205,7 @@ public class DisplacementCleaner {
         finalResult.setHorizontalChangeRate(horizontalChangeRate);
         finalResult.setVerticalChangeRate(verticalChangeRate);
         finalResult.setWindowStability(windowStability);
+        finalResult.setDriftSuspicion(tempState.isDriftSuspicion());
         return finalResult;
     }
 
@@ -250,11 +258,27 @@ public class DisplacementCleaner {
             return r1;
         }
 
+        // L0 小波去噪（新增预处理层）
+        if (config.waveletEnabled) {
+            waveletDenoiser.pushToBuffer(state, result.getdNorth(), result.getdEast(), result.getdUp());
+            WaveletDenoiser.DenoisedResult denoised = waveletDenoiser.denoise(state);
+            if (denoised != null) {
+                result.setDenoisedNorth(denoised.north);
+                result.setDenoisedEast(denoised.east);
+                result.setDenoisedUp(denoised.up);
+            }
+        }
         CleanResult r2 = layer2JumpDetection(result, state);
         if (!r2.isPassed()) {
             stepFlag = 1.0;
         }
 
+
+        // L2 CUSUM 漂移检测（追加）
+        if (config.cusumEnabled) {
+            cusumDetector.detect(state, result.getdNorth(), result.getdEast(), result.getdUp(),
+                    state.getNorthWindow(), state.getEastWindow(), state.getUpWindow());
+        }
         CleanResult r3 = layer3StatisticalOutlier(result, state);
         if (!r3.isPassed()) {
             layer4AnomalyReplacement(result, state, r3);
@@ -265,6 +289,7 @@ public class DisplacementCleaner {
             stepFlag = 1.0;
         }
 
+        epochCounter++;
         updateWindows(result, state);
         result.setCleaned(true);
 
@@ -340,9 +365,9 @@ public class DisplacementCleaner {
 
         if (status == SolutionStatus.FLOAT) {
             result.setDowngraded(true);
-            if (result.getNumSatellites() < config.minSatellite) {
+            if (result.getNumSatellites() < config.minSatellites) {
                 result.setAbnormal(true);
-                result.setAbnormalReason("Layer1: FLOAT with < " + config.minSatellite + " satellites");
+                result.setAbnormalReason("Layer1: FLOAT with < " + config.minSatellites + " satellites");
                 return CleanResult.fail(result, 1, "FLOAT with insufficient satellites");
             }
             if (result.getPdop() > config.maxPdopFloat) {
@@ -367,9 +392,9 @@ public class DisplacementCleaner {
         }
 
         if (status == SolutionStatus.FIX) {
-            if (result.getNumSatellites() < config.minSatellite) {
+            if (result.getNumSatellites() < config.minSatellites) {
                 result.setAbnormal(true);
-                result.setAbnormalReason("Layer1: FIX with < " + config.minSatellite + " satellites");
+                result.setAbnormalReason("Layer1: FIX with < " + config.minSatellites + " satellites");
                 return CleanResult.fail(result, 1, "FIX with insufficient satellites");
             }
             if (result.getPdop() > config.maxPdop) {
@@ -553,7 +578,23 @@ public class DisplacementCleaner {
         }
 
         if (isOutlier) {
-            return CleanResult.fail(result, 3, "Statistical outlier");
+                        CleanResult cr = CleanResult.fail(result, 3, "Statistical outlier");
+            cr.setOutlierConfidence("NORMAL");
+            if (config.waveletResidualEnabled && state.getDenoisedNorth() != null) {
+                double resN = Math.abs(result.getdNorth() - state.getDenoisedNorth());
+                double resE = Math.abs(result.getdEast() - state.getDenoisedEast());
+                double resU = Math.abs(result.getdUp() - state.getDenoisedUp());
+                double madN = mad(nw);
+                double madE = mad(ew);
+                double madU = mad(uw);
+                boolean waveletOutlier = (madN > 0 && resN > config.outlierThreshold * madN)
+                        || (madE > 0 && resE > config.outlierThreshold * madE)
+                        || (madU > 0 && resU > config.outlierThreshold * madU);
+                if (waveletOutlier) {
+                    cr.setOutlierConfidence("HIGH");
+                }
+            }
+            return cr;
         }
         return CleanResult.pass(result);
     }
@@ -759,14 +800,36 @@ public class DisplacementCleaner {
      * @param state  设备状态
      * @param r3     第3层清洗结果
      */
-    private void layer4AnomalyReplacement(DisplacementResult result, DeviceState state, CleanResult r3) {
+    
+                private void layer4AnomalyReplacement(DisplacementResult result, DeviceState state, CleanResult r3) {
         if (r3.isPassed()) {
+            state.setConsecutiveOutlierCount(0);
+            state.setConsecutiveOutlierStart(-1);
             return;
         }
+
+        int count = state.getConsecutiveOutlierCount() + 1;
 
         LinkedList<Double> nw = state.getNorthWindow();
         LinkedList<Double> ew = state.getEastWindow();
         LinkedList<Double> uw = state.getUpWindow();
+
+        if (count >= config.maxInterpolationLength) {
+            result.setAbnormal(true);
+            result.setAbnormalReason("Layer4: invalid data segment (" + count + " consecutive outliers)");
+            state.setConsecutiveOutlierCount(0);
+            return;
+        }
+
+        if (count >= config.consecutiveOutlierThreshold) {
+            result.setdNorth(state.getLastValidNorth());
+            result.setdEast(state.getLastValidEast());
+            result.setdUp(state.getLastValidUp());
+            result.setAbnormal(false);
+            result.setAbnormalReason("Layer4: segmented replacement (consecutive " + count + ")");
+            state.setConsecutiveOutlierCount(count);
+            return;
+        }
 
         if (nw.size() >= config.windowSize) {
             if (config.algorithm == Algorithm.THREE_SIGMA) {
@@ -786,6 +849,10 @@ public class DisplacementCleaner {
         result.setAbnormal(false);
         result.setAbnormalReason("Layer4: replaced outlier");
     }
+
+
+
+
 
     // ==================== 第五层：长期基线记忆 ====================
 
@@ -870,9 +937,10 @@ public class DisplacementCleaner {
             double fbMedN = fbN.size() >= 2 ? median(fbN) : result.getdNorth();
             double fbMedE = fbE.size() >= 2 ? median(fbE) : result.getdEast();
             double fbMedU = fbU.size() >= 2 ? median(fbU) : result.getdUp();
-            double sbMedN = sbN.size() >= 2 ? median(sbN) : fbMedN;
-            double sbMedE = sbE.size() >= 2 ? median(sbE) : fbMedE;
-            double sbMedU = sbU.size() >= 2 ? median(sbU) : fbMedU;
+            double sbMedN = computeSlowBaseline(state, sbN, fbMedN, "N");
+            double sbMedE = computeSlowBaseline(state, sbE, fbMedE, "E");
+            double sbMedU = computeSlowBaseline(state, sbU, fbMedU, "U");
+
 
             double diffN = Math.abs(fbMedN - sbMedN);
             double diffE = Math.abs(fbMedE - sbMedE);
@@ -1108,5 +1176,65 @@ public class DisplacementCleaner {
         double rangeU = maxU - minU;
 
         return Math.max(rangeN, Math.max(rangeE, rangeU));
+    }
+
+    // ========== L5 LOESS 慢基线计算 ==========
+
+    private double computeSlowBaseline(DeviceState state, LinkedList<Double> slowBaseline, double fallback, String component) {
+        if (!config.loessSlowBaselineEnabled || slowBaseline.size() < 10) {
+            return slowBaseline.size() >= 2 ? median(slowBaseline) : fallback;
+        }
+
+        int interval = config.loessRecalculateInterval;
+        int epochsSinceLastCalc = epochCounter - state.getLoessLastRecalcEpoch();
+        Double cached = null;
+        switch (component) {
+            case "N" -> cached = state.getLoessSlowBaselineNorth();
+            case "E" -> cached = state.getLoessSlowBaselineEast();
+            case "U" -> cached = state.getLoessSlowBaselineUp();
+        }
+
+        if (cached != null && epochsSinceLastCalc < interval) {
+            return cached;
+        }
+
+        try {
+            double[] x = new double[slowBaseline.size()];
+            double[] y = new double[slowBaseline.size()];
+            int i = 0;
+            for (Double v : slowBaseline) {
+                x[i] = i;
+                y[i] = v;
+                i++;
+            }
+
+            LoessInterpolator loess = new LoessInterpolator(config.loessBandwidth, 1);
+            double[] smoothed = loess.smooth(x, y);
+
+            double result = smoothed[smoothed.length - 1];
+
+            switch (component) {
+                case "N" -> state.setLoessSlowBaselineNorth(result);
+                case "E" -> state.setLoessSlowBaselineEast(result);
+                case "U" -> state.setLoessSlowBaselineUp(result);
+            }
+            state.setLoessLastRecalcEpoch(epochCounter);
+
+            return result;
+        } catch (Exception e) {
+            return slowBaseline.size() >= 2 ? median(slowBaseline) : fallback;
+        }
+    }
+
+    // ========== MAD 辅助方法 ==========
+
+    private double mad(LinkedList<Double> window) {
+        if (window == null || window.isEmpty()) return 0.0;
+        double med = median(window);
+        double sum = 0;
+        for (double v : window) {
+            sum += Math.abs(v - med);
+        }
+        return sum / window.size();
     }
 }

@@ -2,6 +2,8 @@ package org.gnss;
 
 import org.gnss.cache.DeviceStateCache;
 import org.gnss.cleaning.DefaultSpatialCheckService;
+import org.gnss.cleaning.PcaSpatialCheckService;
+import org.gnss.cleaning.ChangePointScanner;
 import org.gnss.cleaning.DisplacementCleaner;
 import org.gnss.cleaning.Layer7Arbitrator;
 import org.gnss.config.CacheConfig;

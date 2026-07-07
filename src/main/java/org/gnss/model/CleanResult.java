@@ -85,6 +85,10 @@ public class CleanResult {
 
     /** 天向加速度（米/秒²），基于当前与上一速度差分计算，默认：0.0 */
     private double accelerationU;
+    private boolean driftSuspicion;
+    private String outlierConfidence;
+    private boolean segmentedReplacement;
+    private boolean invalidDataSegment;
 
     public CleanResult() {
     }
@@ -367,4 +371,16 @@ public class CleanResult {
         fv.setAccelerationU(accelerationU);
         return fv;
     }
+
+    public boolean isDriftSuspicion() { return driftSuspicion; }
+    public void setDriftSuspicion(boolean driftSuspicion) { this.driftSuspicion = driftSuspicion; }
+
+    public String getOutlierConfidence() { return outlierConfidence; }
+    public void setOutlierConfidence(String outlierConfidence) { this.outlierConfidence = outlierConfidence; }
+
+    public boolean isSegmentedReplacement() { return segmentedReplacement; }
+    public void setSegmentedReplacement(boolean segmentedReplacement) { this.segmentedReplacement = segmentedReplacement; }
+
+    public boolean isInvalidDataSegment() { return invalidDataSegment; }
+    public void setInvalidDataSegment(boolean invalidDataSegment) { this.invalidDataSegment = invalidDataSegment; }
 }

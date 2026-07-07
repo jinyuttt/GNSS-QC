@@ -1,18 +1,18 @@
 package org.gnss.config;
 
 /**
- * 六层清洗配置
+ * 清洗配置
  * <p>所有阈值通过配置类注入，支持默认值</p>
  */
 public class CleanConfig {
 
     // ========== 第一层：质量门禁 ==========
 
-    /** 最小卫星数，默认：6 */
-    public int minSatellite = 6;
+    /** 最小卫星数，默认：4 */
+    public int minSatellites = 4;
 
-    /** 最大PDOP（FIX解），默认：4.0 */
-    public double maxPdop = 4.0;
+    /** 最大PDOP，默认：6.0 */
+    public double maxPdop = 6.0;
 
     /** 最大PDOP（FLOAT解），默认：6.0 */
     public double maxPdopFloat = 6.0;
@@ -137,6 +137,69 @@ public class CleanConfig {
 
     /** 空间校验最少邻居设备数，默认：2 */
     public int spatialMinNeighbors = 2;
+
+    // ========== L0 小波去噪 ==========
+
+    /** 是否启用L0小波去噪，默认：true */
+    public boolean waveletEnabled = true;
+
+    /** 小波去噪滑动窗口大小（必须为2的幂），默认：32 */
+    public int waveletWindowSize = 32;
+
+    /** 小波去噪阈值缩放系数，默认：0.7 */
+    public double waveletThresholdScale = 0.7;
+
+    // ========== L2 CUSUM ==========
+
+    /** 是否启用L2 CUSUM漂移检测，默认：true */
+    public boolean cusumEnabled = true;
+
+    /** CUSUM灵敏度系数k（×MAD），默认：0.5 */
+    public double cusumK = 0.5;
+
+    /** CUSUM报警阈值h（×MAD），默认：5.0 */
+    public double cusumH = 5.0;
+
+    // ========== L3 双模检测 ==========
+
+    /** 是否启用L3小波残差检测（需L0启用），默认：true */
+    public boolean waveletResidualEnabled = true;
+
+    /** L3残差阈值系数（×MAD），默认：3.0 */
+    public double outlierThreshold = 3.0;
+
+    // ========== L4 分段替换 ==========
+
+    /** 连续粗差块判定阈值（≥此历元数触发分段替换），默认：3 */
+    public int consecutiveOutlierThreshold = 3;
+
+    /** 最长插值段（历元数），超过则标记为无效数据，默认：10 */
+    public int maxInterpolationLength = 10;
+
+    /** 插值使用的前后正常历元数，默认：3 */
+    public int interpolationNeighborCount = 3;
+
+    // ========== L5 LOESS ==========
+
+    /** 是否启用LOESS慢基线（替代中位数慢基线），默认：true */
+    public boolean loessSlowBaselineEnabled = true;
+
+    /** LOESS带宽参数，默认：0.3 */
+    public double loessBandwidth = 0.3;
+
+    /** LOESS重算间隔（历元数），默认：20（5分钟） */
+    public int loessRecalculateInterval = 20;
+
+    // ========== L6 PCA ==========
+
+    /** 是否启用L6 PCA共模扣除（替代组中位数），默认：true */
+    public boolean pcaEnabled = true;
+
+    /** PCA滑动窗口大小（历元数），默认：20 */
+    public int pcaWindowSize = 20;
+
+    /** PCA第一主成分方差贡献率阈值，低于此值不扣除，默认：0.6 */
+    public double pcaVarianceThreshold = 0.6;
 
     public CleanConfig() {
     }

@@ -38,7 +38,17 @@
       <artifactId>smile-core</artifactId>
       <version>4.2.0</version>
     </dependency>
-  </dependencies>
+    <dependency>
+    <groupId>org.hipparchus</groupId>
+    <artifactId>hipparchus-core</artifactId>
+    <version>3.0</version>
+  </dependency>
+  <dependency>
+    <groupId>org.hipparchus</groupId>
+    <artifactId>hipparchus-stat</artifactId>
+    <version>3.0</version>
+  </dependency>
+</dependencies>
 
   <build>
     <plugins>
