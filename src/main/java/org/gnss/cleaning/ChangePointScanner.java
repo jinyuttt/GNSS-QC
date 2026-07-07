@@ -128,17 +128,7 @@ public class ChangePointScanner {
         int n = data.length;
         if (n < 10) return -1;
 
-        double[] ranks = new double[n];
-        double[] sorted = data.clone();
-        java.util.Arrays.sort(sorted);
-        for (int i = 0; i < n; i++) {
-            for (int j = 0; j < n; j++) {
-                if (data[i] == sorted[j]) {
-                    ranks[i] = j + 1;
-                    break;
-                }
-            }
-        }
+        double[] ranks = computeAverageRanks(data);
 
         double maxU = 0;
         int changePoint = -1;
@@ -154,10 +144,37 @@ public class ChangePointScanner {
         }
 
         double pValue = 2.0 * Math.exp(-6.0 * maxU * maxU / (n * n * (n + 1)));
+        if (pValue > 1.0) pValue = 1.0;
         if (pValue < 0.05) {
             return changePoint;
         }
         return -1;
+    }
+
+    private double[] computeAverageRanks(double[] data) {
+        int n = data.length;
+        Integer[] indices = new Integer[n];
+        for (int i = 0; i < n; i++) indices[i] = i;
+        java.util.Arrays.sort(indices, (a, b) -> Double.compare(data[a], data[b]));
+
+        double[] ranks = new double[n];
+        int i = 0;
+        while (i < n) {
+            int j = i;
+            while (j < n - 1 && data[indices[j + 1]] == data[indices[j]]) {
+                j++;
+            }
+            double avgRank = 0;
+            for (int k = i; k <= j; k++) {
+                avgRank += (k + 1);
+            }
+            avgRank /= (j - i + 1);
+            for (int k = i; k <= j; k++) {
+                ranks[indices[k]] = avgRank;
+            }
+            i = j + 1;
+        }
+        return ranks;
     }
 
     private double computeShift(double[] data, int changePoint) {

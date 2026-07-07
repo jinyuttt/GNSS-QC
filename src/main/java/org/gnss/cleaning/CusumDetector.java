@@ -107,10 +107,14 @@ public class CusumDetector {
 
     private double mad(List<Double> list, double median) {
         if (list == null || list.isEmpty()) return 0.0;
-        double sum = 0;
-        for (double v : list) {
-            sum += Math.abs(v - median);
+        double[] deviations = new double[list.size()];
+        for (int i = 0; i < list.size(); i++) {
+            deviations[i] = Math.abs(list.get(i) - median);
         }
-        return sum / list.size();
+        double[] sorted = deviations.clone();
+        java.util.Arrays.sort(sorted);
+        int n = sorted.length;
+        if (n % 2 == 1) return sorted[n / 2];
+        return (sorted[n / 2 - 1] + sorted[n / 2]) / 2.0;
     }
 }

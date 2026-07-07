@@ -3,19 +3,11 @@ package org.gnss.cleaning;
 import org.gnss.config.CleanConfig;
 import org.gnss.model.SpatialCheckResult;
 import org.gnss.model.SpatialGroupInput;
-import org.hipparchus.linear.RealMatrix;
-import org.hipparchus.linear.RealVector;
+import org.hipparchus.linear.*;
 import org.hipparchus.stat.correlation.Covariance;
-import org.hipparchus.stat.descriptive.rank.Median;
 
 import java.util.*;
 
-/**
- * L6 滑动窗口PCA共模扣除
- * <p>扣除区域内所有设备的共模误差，根治"集体漂移"，替代无效的组中位数。</p>
- * <p>窗口大小20个历元，按N/E/U分别做PCA。第一主成分方差贡献率≥60%时才扣除。</p>
- * <p>设备数<3台时自动退化为组中位数。</p>
- */
 public class PcaSpatialCheckService implements SpatialCheckService {
 
     private final CleanConfig config;
@@ -42,7 +34,10 @@ public class PcaSpatialCheckService implements SpatialCheckService {
         double medE = median(groupInputs.stream().mapToDouble(SpatialGroupInput::getdEast).toArray());
         double medU = median(groupInputs.stream().mapToDouble(SpatialGroupInput::getdUp).toArray());
 
-        for (SpatialGroupInput device : groupInputs) {
+        double[][] reconstructed = computePcaReconstructed(groupInputs);
+
+        for (int idx = 0; idx < groupInputs.size(); idx++) {
+            SpatialGroupInput device = groupInputs.get(idx);
             SpatialCheckResult r = new SpatialCheckResult();
             r.setDeviceId(device.getDeviceId());
             r.setEpochMillis(device.getEpochMillis());
@@ -56,18 +51,23 @@ public class PcaSpatialCheckService implements SpatialCheckService {
             double sameDirRatio = computeSameDirectionRatio(device, groupInputs);
             r.setSameDirectionNeighborRatio(sameDirRatio);
 
-            double[] pcaPredicted = computePcaPrediction(groupInputs, device);
-            if (pcaPredicted != null) {
-                double residualN = Math.abs(device.getdNorth() - pcaPredicted[0]);
-                double residualE = Math.abs(device.getdEast() - pcaPredicted[1]);
-                double residualU = Math.abs(device.getdUp() - pcaPredicted[2]);
+            if (reconstructed != null) {
+                double predN = reconstructed[idx][0];
+                double predE = reconstructed[idx][1];
+                double predU = reconstructed[idx][2];
 
-                double[] allResidualsN = groupInputs.stream()
-                        .mapToDouble(d -> Math.abs(d.getdNorth() - pcaPredicted[0])).toArray();
-                double[] allResidualsE = groupInputs.stream()
-                        .mapToDouble(d -> Math.abs(d.getdEast() - pcaPredicted[1])).toArray();
-                double[] allResidualsU = groupInputs.stream()
-                        .mapToDouble(d -> Math.abs(d.getdUp() - pcaPredicted[2])).toArray();
+                double residualN = Math.abs(device.getdNorth() - predN);
+                double residualE = Math.abs(device.getdEast() - predE);
+                double residualU = Math.abs(device.getdUp() - predU);
+
+                double[] allResidualsN = new double[groupInputs.size()];
+                double[] allResidualsE = new double[groupInputs.size()];
+                double[] allResidualsU = new double[groupInputs.size()];
+                for (int j = 0; j < groupInputs.size(); j++) {
+                    allResidualsN[j] = Math.abs(groupInputs.get(j).getdNorth() - reconstructed[j][0]);
+                    allResidualsE[j] = Math.abs(groupInputs.get(j).getdEast() - reconstructed[j][1]);
+                    allResidualsU[j] = Math.abs(groupInputs.get(j).getdUp() - reconstructed[j][2]);
+                }
 
                 double madN = mad(allResidualsN);
                 double madE = mad(allResidualsE);
@@ -80,9 +80,9 @@ public class PcaSpatialCheckService implements SpatialCheckService {
                 if (isOutlier) {
                     r.setOutlier(true);
                     r.setOutlierReason("Layer6: PCA spatial outlier");
-                    r.setReplacedN(pcaPredicted[0]);
-                    r.setReplacedE(pcaPredicted[1]);
-                    r.setReplacedU(pcaPredicted[2]);
+                    r.setReplacedN(predN);
+                    r.setReplacedE(predE);
+                    r.setReplacedU(predU);
                 } else {
                     r.setOutlier(false);
                     r.setOutlierReason("");
@@ -123,26 +123,68 @@ public class PcaSpatialCheckService implements SpatialCheckService {
         return true;
     }
 
-    private double[] computePcaPrediction(List<SpatialGroupInput> groupInputs, SpatialGroupInput target) {
+    private double[][] computePcaReconstructed(List<SpatialGroupInput> groupInputs) {
         int m = groupInputs.size();
         if (m < 3) return null;
 
         try {
-            double[][] dataN = new double[m][1];
-            double[][] dataE = new double[m][1];
-            double[][] dataU = new double[m][1];
-
+            double[][] data = new double[m][3];
             for (int i = 0; i < m; i++) {
-                dataN[i][0] = groupInputs.get(i).getdNorth();
-                dataE[i][0] = groupInputs.get(i).getdEast();
-                dataU[i][0] = groupInputs.get(i).getdUp();
+                data[i][0] = groupInputs.get(i).getdNorth();
+                data[i][1] = groupInputs.get(i).getdEast();
+                data[i][2] = groupInputs.get(i).getdUp();
             }
 
-            double meanN = Arrays.stream(dataN).mapToDouble(r -> r[0]).average().orElse(0);
-            double meanE = Arrays.stream(dataE).mapToDouble(r -> r[0]).average().orElse(0);
-            double meanU = Arrays.stream(dataU).mapToDouble(r -> r[0]).average().orElse(0);
+            double meanN = 0, meanE = 0, meanU = 0;
+            for (int i = 0; i < m; i++) {
+                meanN += data[i][0];
+                meanE += data[i][1];
+                meanU += data[i][2];
+            }
+            meanN /= m;
+            meanE /= m;
+            meanU /= m;
 
-            return new double[]{meanN, meanE, meanU};
+            double[][] centeredDataArray = new double[m][3];
+            for (int i = 0; i < m; i++) {
+                centeredDataArray[i][0] = data[i][0] - meanN;
+                centeredDataArray[i][1] = data[i][1] - meanE;
+                centeredDataArray[i][2] = data[i][2] - meanU;
+            }
+            RealMatrix centeredData = new Array2DRowRealMatrix(centeredDataArray);
+
+            SingularValueDecomposition svd = new SingularValueDecomposition(centeredData);
+            RealMatrix V = svd.getV();
+
+            double[] singularValues = svd.getSingularValues();
+            double totalVariance = 0;
+            for (double sv : singularValues) {
+                totalVariance += sv * sv;
+            }
+            if (totalVariance == 0) return null;
+
+            double cumulativeVariance = 0;
+            int numComponents = 0;
+            for (int i = 0; i < singularValues.length; i++) {
+                cumulativeVariance += singularValues[i] * singularValues[i];
+                numComponents++;
+                if (cumulativeVariance / totalVariance >= config.pcaVarianceThreshold) {
+                    break;
+                }
+            }
+
+            RealMatrix Vk = V.getSubMatrix(0, 2, 0, numComponents - 1);
+            RealMatrix projected = centeredData.multiply(Vk);
+            RealMatrix reconstructed = projected.multiply(Vk.transpose());
+
+            double[][] result = new double[m][3];
+            for (int i = 0; i < m; i++) {
+                result[i][0] = reconstructed.getEntry(i, 0) + meanN;
+                result[i][1] = reconstructed.getEntry(i, 1) + meanE;
+                result[i][2] = reconstructed.getEntry(i, 2) + meanU;
+            }
+
+            return result;
         } catch (Exception e) {
             return null;
         }
