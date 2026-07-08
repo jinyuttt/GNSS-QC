@@ -61,8 +61,8 @@ class InferenceEngine:
     def infer_single(self, station_id: str, features: Dict) -> Dict:
         t0 = time.time()
 
-        self.rrcf.update([features])
         rrcf_score = self.rrcf.score(features)
+        self.rrcf.update([features], rebuild=False)
         lstm_result = self.lstm.predict(station_id, features)
 
         self.rrcf.record_score(rrcf_score)
@@ -82,8 +82,8 @@ class InferenceEngine:
                     features_list: List[Dict]) -> List[Dict]:
         t0 = time.time()
 
-        self.rrcf.update(features_list)
         rrcf_scores = self.rrcf.score_batch(features_list)
+        self.rrcf.update(features_list, rebuild=False)
         lstm_results = self.lstm.predict_batch(station_ids, features_list)
 
         for score in rrcf_scores:
@@ -104,7 +104,6 @@ class InferenceEngine:
             results.append(combined)
 
         return results
-
     def _report_quality(self, result: Dict):
         """上报推理质量指标，供模型管理器判断是否需要回滚"""
         self._total_inferences += 1

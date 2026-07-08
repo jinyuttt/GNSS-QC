@@ -130,8 +130,13 @@ class RRCFModel:
     def score_batch(self, features_list: List[Dict]) -> np.ndarray:
         return np.array([self.score(f) for f in features_list])
 
-    def update(self, features_list: List[Dict]):
-        """增量更新：将新数据加入采样池，触发重建"""
+    def update(self, features_list: List[Dict], rebuild: bool = True):
+        """增量更新：将新数据加入采样池，可选重建森林
+
+        Args:
+            features_list: 新特征数据列表
+            rebuild: 是否重建森林。训练时True，推理时False避免性能开销
+        """
         new_points = np.array([self._feature_to_array(f) for f in features_list])
 
         if self._sample_pool is None:
@@ -148,7 +153,9 @@ class RRCFModel:
             self._pool_size = keep
 
         self._point_count += len(features_list)
-        self._rebuild_forest()
+
+        if rebuild:
+            self._rebuild_forest()
 
         if self._point_count % 500 == 0:
             self._update_threshold()
@@ -166,7 +173,6 @@ class RRCFModel:
         self._score_history.append(score)
         if len(self._score_history) > 2000:
             self._score_history = self._score_history[-2000:]
-
     def save(self, dirpath: str):
         os.makedirs(dirpath, exist_ok=True)
         state = {

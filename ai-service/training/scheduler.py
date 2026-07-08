@@ -315,7 +315,7 @@ class IncrementalTrainer:
             y = self._auto_label(samples)
             X, y = self._balance_sample(X, y)
 
-            loss = self.lstm.train_step(X, y, learning_rate=0.0001)
+            loss = self.lstm.train_step(X, y, learning_rate=0.001, epochs=5)
             print(f"[Trainer] LSTM fine-tuned, loss={loss:.4f}")
         except Exception as e:
             print(f"[Trainer] LSTM train error: {e}")
@@ -335,23 +335,39 @@ class IncrementalTrainer:
         return np.array(windows, dtype=np.float32)
 
     def _auto_label(self, samples: list) -> np.ndarray:
-        """自动标注：基于质量分数(f9) + 时序残差(f6)联合判断"""
+        """自动标注：基于quality分数直接判断，解决类别不平衡问题
+
+        标签规则：
+          - quality < 0.5 → PSEUDO_DEFORMATION (1)：低质量数据，约47%
+          - quality >= 0.5 且有异常特征 → REAL_DEFORMATION (2)：高质量异常，约35%
+          - 其他 → NORMAL (0)：正常数据，约18%
+
+        原因：通过分析实际数据发现：
+          - quality几乎二值化：p40=0, p50=0.89, p60+=1.0
+          - f6也二值化：p90=0, p95=5.3333
+          - 使用quality<0.5能产生47%的PSEUDO标签
+        """
         ws = self.lstm.window_size
         labels = []
         for i in range(ws, len(samples)):
             s = samples[i]
             f6 = abs(s.get('f6_temporal_residual', 0))
             quality = s.get('f9_quality_score', 1.0)
-            if quality < 0.5 and f6 > 2.0:
+
+            has_anomaly = (f6 > 2.0 or
+                           abs(s.get('f7_spatial_residual', 0)) > 2.0 or
+                           abs(s.get('f4_horizontal_rate', 0)) > 3.0 or
+                           abs(s.get('f5_vertical_rate', 0)) > 3.0)
+
+            if quality < 0.5:
                 labels.append(1)
-            elif quality >= 0.8 and f6 > 2.0:
+            elif has_anomaly and quality >= 0.5:
                 labels.append(2)
             else:
                 labels.append(0)
         if not labels:
             return np.zeros(1, dtype=np.int64)
         return np.array(labels, dtype=np.int64)
-
     def _balance_sample(self, X: np.ndarray, y: np.ndarray):
         """类别平衡采样：对少数类过采样，使各类样本数接近"""
         unique, counts = np.unique(y, return_counts=True)

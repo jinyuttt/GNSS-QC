@@ -235,34 +235,51 @@ class LSTMAttentionModel:
             self._b_cls = np.array(state['b_cls'], dtype=np.float32)
         return True
 
-    def train_step(self, X, y, learning_rate=0.001):
+    def train_step(self, X, y, learning_rate=0.001, epochs=5):
+        """多epoch训练，使用单个optimizer进行多轮梯度下降
+
+        Args:
+            X: 输入数据 (samples, window_size, input_size)
+            y: 标签 (samples,)
+            learning_rate: 学习率，默认0.001
+            epochs: 训练轮数，默认5
+        """
         batch_size = min(X.shape[0], 32)
         total_loss = 0.0
-        for i in range(0, X.shape[0], batch_size):
-            batch_X = X[i:i + batch_size]
-            batch_y = y[i:i + batch_size]
-            if self._use_torch and self._torch_model is not None:
-                import torch
-                import torch.nn as nn
-                self._torch_model.train()
-                optimizer = torch.optim.Adam(
-                    self._torch_model.parameters(), lr=learning_rate
-                )
-                criterion = nn.CrossEntropyLoss()
-                x_t = torch.from_numpy(batch_X).float()
-                y_t = torch.from_numpy(batch_y).long()
-                logits = self._torch_model(x_t)
-                loss = criterion(logits, y_t)
-                optimizer.zero_grad()
-                loss.backward()
-                optimizer.step()
-                total_loss += loss.item()
-            else:
-                for j in range(len(batch_X)):
-                    probs = self._numpy_forward(batch_X[j])
-                    loss = -np.log(max(probs[batch_y[j]], 1e-8))
+
+        if self._use_torch and self._torch_model is not None:
+            import torch
+            import torch.nn as nn
+            self._torch_model.train()
+            optimizer = torch.optim.Adam(
+                self._torch_model.parameters(), lr=learning_rate
+            )
+            criterion = nn.CrossEntropyLoss()
+
+            for epoch in range(epochs):
+                epoch_loss = 0.0
+                perm = np.random.permutation(X.shape[0])
+                for i in range(0, X.shape[0], batch_size):
+                    idx = perm[i:i + batch_size]
+                    batch_X = X[idx]
+                    batch_y = y[idx]
+                    x_t = torch.from_numpy(batch_X).float()
+                    y_t = torch.from_numpy(batch_y).long()
+                    logits = self._torch_model(x_t)
+                    loss = criterion(logits, y_t)
+                    optimizer.zero_grad()
+                    loss.backward()
+                    optimizer.step()
+                    epoch_loss += loss.item()
+                total_loss += epoch_loss
+            return total_loss / (X.shape[0] * epochs)
+        else:
+            for epoch in range(epochs):
+                for j in range(len(X)):
+                    probs = self._numpy_forward(X[j])
+                    loss = -np.log(max(probs[y[j]], 1e-8))
                     total_loss += loss
-        return total_loss / max(X.shape[0], 1)
+            return total_loss / max(len(X) * epochs, 1)
 
     def clear_window(self, station_id):
         if station_id in self._windows:
