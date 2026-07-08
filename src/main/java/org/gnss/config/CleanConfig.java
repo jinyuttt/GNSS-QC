@@ -35,8 +35,11 @@ public class CleanConfig {
     /** 最小Ratio（FLOAT解），FLOAT解ratio低于此值视为模糊度未收敛，默认：1.5 */
     public double minRatioFloat = 1.5;
 
-    /** 最大位移阈值（米），N/E/U任一分量绝对值超过此值直接拒绝，默认：2000 */
-    public double maxDisplacement = 2000;
+    /** 最大位移阈值（米），FLOAT解N/E/U任一分量绝对值超过此值直接拒绝，默认：1.0 */
+    public double maxDisplacementFloat = 1.0;
+
+    /** 最大位移阈值-FIX解（米），默认：3.0 */
+    public double maxDisplacementFix = 3.0;
 
     /** 是否使用三维RMS替代单分量RMS进行质量门控，默认：true */
     public boolean useRms3d = true;

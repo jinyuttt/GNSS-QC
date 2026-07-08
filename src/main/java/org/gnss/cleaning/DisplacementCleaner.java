@@ -175,7 +175,7 @@ public class DisplacementCleaner {
         double timeSeriesResidual = computeTimeSeriesResidual(result, tempState);
         double windowStability = computeWindowStability(tempState);
 
-        CleanResult r1 = layer1QualityGate(result);
+        CleanResult r1 = layer1QualityGate(result, tempState);
         if (!r1.isPassed()) {
             r1.setTimeSeriesResidual(timeSeriesResidual);
             r1.setSolutionQuality(solutionQuality);
@@ -248,7 +248,7 @@ public class DisplacementCleaner {
         timeSeriesResidual = computeTimeSeriesResidual(result, state);
         windowStability = computeWindowStability(state);
 
-        CleanResult r1 = layer1QualityGate(result);
+        CleanResult r1 = layer1QualityGate(result, state);
         if (!r1.isPassed()) {
             r1.setTimeSeriesResidual(timeSeriesResidual);
             r1.setSolutionQuality(solutionQuality);
@@ -341,7 +341,7 @@ public class DisplacementCleaner {
      * @param result 位移结果
      * @return 清洗结果
      */
-    private CleanResult layer1QualityGate(DisplacementResult result) {
+    private CleanResult layer1QualityGate(DisplacementResult result, DeviceState state) {
         SolutionStatus status = result.getStatus();
 
         if (status == SolutionStatus.INVALID || status == SolutionStatus.SINGLE) {
@@ -351,20 +351,22 @@ public class DisplacementCleaner {
             return CleanResult.fail(result, 1, "Invalid or single solution");
         }
 
-        if (config.maxDisplacement > 0) {
-            double absN = Math.abs(result.getdNorth());
-            double absE = Math.abs(result.getdEast());
-            double absU = Math.abs(result.getdUp());
-            if (absN > config.maxDisplacement || absE > config.maxDisplacement || absU > config.maxDisplacement) {
-                result.setAbnormal(true);
-                result.setAbnormalReason(String.format("Layer1: displacement exceeds max (%.4f/%.4f/%.4f > %.4f)",
-                        absN, absE, absU, config.maxDisplacement));
-                return CleanResult.fail(result, 1, "Displacement exceeds maximum threshold");
-            }
-        }
 
         if (status == SolutionStatus.FLOAT) {
             result.setDowngraded(true);
+            
+            if (config.maxDisplacementFloat > 0 && state.isLastValidInitialized()) {
+                double absN = Math.abs(result.getdNorth());
+                double absE = Math.abs(result.getdEast());
+                double absU = Math.abs(result.getdUp());
+                if (absN > config.maxDisplacementFloat || absE > config.maxDisplacementFloat || absU > config.maxDisplacementFloat) {
+                    result.setAbnormal(true);
+                    result.setAbnormalReason(String.format("Layer1: FLOAT displacement exceeds max (%.4f/%.4f/%.4f > %.4f)",
+                            absN, absE, absU, config.maxDisplacementFloat));
+                    return CleanResult.fail(result, 1, "FLOAT displacement exceeds maximum threshold");
+                }
+            }
+            
             if (result.getNumSatellites() < config.minSatellites) {
                 result.setAbnormal(true);
                 result.setAbnormalReason("Layer1: FLOAT with < " + config.minSatellites + " satellites");
@@ -392,6 +394,19 @@ public class DisplacementCleaner {
         }
 
         if (status == SolutionStatus.FIX) {
+            
+            if (config.maxDisplacementFix > 0 && state.isLastValidInitialized()) {
+                double absN = Math.abs(result.getdNorth());
+                double absE = Math.abs(result.getdEast());
+                double absU = Math.abs(result.getdUp());
+                if (absN > config.maxDisplacementFix || absE > config.maxDisplacementFix || absU > config.maxDisplacementFix) {
+                    result.setAbnormal(true);
+                    result.setAbnormalReason(String.format("Layer1: FIX displacement exceeds max (%.4f/%.4f/%.4f > %.4f)",
+                            absN, absE, absU, config.maxDisplacementFix));
+                    return CleanResult.fail(result, 1, "FIX displacement exceeds maximum threshold");
+                }
+            }
+            
             if (result.getNumSatellites() < config.minSatellites) {
                 result.setAbnormal(true);
                 result.setAbnormalReason("Layer1: FIX with < " + config.minSatellites + " satellites");
@@ -534,7 +549,7 @@ public class DisplacementCleaner {
      */
     private CleanResult layer3StatisticalOutlier(DisplacementResult result, DeviceState state) {
         // FLOAT解精度低，跳过统计检测，避免污染统计窗口
-        if (result.isDowngraded()) {
+        if (result.isDowngraded() && !result.isAbnormal()) {
             return CleanResult.pass(result);
         }
 
