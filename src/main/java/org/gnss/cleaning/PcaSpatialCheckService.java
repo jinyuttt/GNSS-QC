@@ -1,6 +1,7 @@
 package org.gnss.cleaning;
 
 import org.gnss.config.CleanConfig;
+import org.gnss.config.SpatialRepairMode;
 import org.gnss.model.SpatialCheckResult;
 import org.gnss.model.SpatialGroupInput;
 import org.hipparchus.linear.*;
@@ -8,6 +9,19 @@ import org.hipparchus.stat.correlation.Covariance;
 
 import java.util.*;
 
+/**
+ * 第6层空间一致性校验 — PCA 实现
+ * <p>
+ * 设计原则（修复方向反转与低方差组误判）：
+ * <ol>
+ *   <li>PCA 仅用于计算公共模式残差（pcaResidual），不再用重构值改写观测，彻底解决方向反转问题</li>
+ *   <li>sameDirectionRatio 参与判决：同向占比≥阈值时不触发替换，允许测点真实局部位移</li>
+ *   <li>双阈值联合判决：方向相反 && 相对MAD超限 && 绝对残差超限，才判定空间异常</li>
+ *   <li>替换值改为剔除自身后的邻居中位数，物理含义明确，不会出现符号反转</li>
+ *   <li>两种修复模式：CAUTIOUS（谨慎修复）、NO_REPAIR（仅计算指标，透传L5结果）</li>
+ * </ol>
+ * </p>
+ */
 public class PcaSpatialCheckService implements SpatialCheckService {
 
     private final CleanConfig config;
@@ -16,7 +30,8 @@ public class PcaSpatialCheckService implements SpatialCheckService {
     public PcaSpatialCheckService(CleanConfig config) {
         this.config = config;
         this.fallbackService = new DefaultSpatialCheckService(
-                config.spatialOutlierThreshold, config.spatialMinNeighbors);
+                config.spatialOutlierThreshold, config.spatialMinNeighbors,
+                config.spatialSameDirectionThreshold);
     }
 
     @Override
@@ -30,9 +45,6 @@ public class PcaSpatialCheckService implements SpatialCheckService {
         }
 
         List<SpatialCheckResult> results = new ArrayList<>();
-        double medN = median(groupInputs.stream().mapToDouble(SpatialGroupInput::getdNorth).toArray());
-        double medE = median(groupInputs.stream().mapToDouble(SpatialGroupInput::getdEast).toArray());
-        double medU = median(groupInputs.stream().mapToDouble(SpatialGroupInput::getdUp).toArray());
 
         double[][] reconstructed = computePcaReconstructed(groupInputs);
 
@@ -43,14 +55,27 @@ public class PcaSpatialCheckService implements SpatialCheckService {
             r.setEpochMillis(device.getEpochMillis());
             r.setNeighborCount(groupInputs.size() - 1);
 
-            double spatialResidual = Math.abs(device.getdNorth() - medN)
-                    + Math.abs(device.getdEast() - medE)
-                    + Math.abs(device.getdUp() - medU);
+            List<SpatialGroupInput> neighbors = new ArrayList<>();
+            for (SpatialGroupInput d : groupInputs) {
+                if (!d.getDeviceId().equals(device.getDeviceId())) {
+                    neighbors.add(d);
+                }
+            }
+
+            double nbMedN = median(neighbors.stream().mapToDouble(SpatialGroupInput::getdNorth).toArray());
+            double nbMedE = median(neighbors.stream().mapToDouble(SpatialGroupInput::getdEast).toArray());
+            double nbMedU = median(neighbors.stream().mapToDouble(SpatialGroupInput::getdUp).toArray());
+
+            double spatialResidual = Math.abs(device.getdNorth() - nbMedN)
+                    + Math.abs(device.getdEast() - nbMedE)
+                    + Math.abs(device.getdUp() - nbMedU);
             r.setSpatialResidual(spatialResidual);
 
-            double sameDirRatio = computeSameDirectionRatio(device, groupInputs);
+            double sameDirRatio = computeSameDirectionRatio(device, neighbors);
             r.setSameDirectionNeighborRatio(sameDirRatio);
 
+            double pcaResidual = 0.0;
+            double madN = 0.0, madE = 0.0, madU = 0.0;
             if (reconstructed != null) {
                 double predN = reconstructed[idx][0];
                 double predE = reconstructed[idx][1];
@@ -59,6 +84,7 @@ public class PcaSpatialCheckService implements SpatialCheckService {
                 double residualN = Math.abs(device.getdNorth() - predN);
                 double residualE = Math.abs(device.getdEast() - predE);
                 double residualU = Math.abs(device.getdUp() - predU);
+                pcaResidual = residualN + residualE + residualU;
 
                 double[] allResidualsN = new double[groupInputs.size()];
                 double[] allResidualsE = new double[groupInputs.size()];
@@ -68,54 +94,83 @@ public class PcaSpatialCheckService implements SpatialCheckService {
                     allResidualsE[j] = Math.abs(groupInputs.get(j).getdEast() - reconstructed[j][1]);
                     allResidualsU[j] = Math.abs(groupInputs.get(j).getdUp() - reconstructed[j][2]);
                 }
+                madN = mad(allResidualsN);
+                madE = mad(allResidualsE);
+                madU = mad(allResidualsU);
+            }
+            r.setPcaResidual(pcaResidual);
 
-                double madN = mad(allResidualsN);
-                double madE = mad(allResidualsE);
-                double madU = mad(allResidualsU);
+            if (config.spatialRepairMode == SpatialRepairMode.NO_REPAIR) {
+                r.setOutlier(false);
+                r.setOutlierReason("Layer6: NO_REPAIR mode, metrics only");
+                passThrough(device, r);
+                results.add(r);
+                continue;
+            }
 
-                boolean isOutlier = (madN > 0 && residualN > config.outlierThreshold * madN)
-                        || (madE > 0 && residualE > config.outlierThreshold * madE)
-                        || (madU > 0 && residualU > config.outlierThreshold * madU);
+            boolean oppositeN = device.getdNorth() * nbMedN < 0;
+            boolean oppositeE = device.getdEast() * nbMedE < 0;
+            boolean oppositeU = device.getdUp() * nbMedU < 0;
+            boolean directionOpposite = oppositeN || oppositeE || oppositeU;
 
-                if (isOutlier) {
-                    r.setOutlier(true);
-                    r.setOutlierReason("Layer6: PCA spatial outlier");
-                    r.setReplacedN(predN);
-                    r.setReplacedE(predE);
-                    r.setReplacedU(predU);
-                } else {
-                    r.setOutlier(false);
-                    r.setOutlierReason("");
-                    r.setReplacedN(device.getdNorth());
-                    r.setReplacedE(device.getdEast());
-                    r.setReplacedU(device.getdUp());
-                }
+            double absDevN = Math.abs(device.getdNorth() - nbMedN);
+            double absDevE = Math.abs(device.getdEast() - nbMedE);
+            double absDevU = Math.abs(device.getdUp() - nbMedU);
+            boolean absoluteExceed = absDevN > config.spatialAbsoluteResidualThreshold
+                    || absDevE > config.spatialAbsoluteResidualThreshold
+                    || absDevU > config.spatialAbsoluteResidualThreshold;
+
+            boolean madExceed = false;
+            if (reconstructed != null) {
+                double resN = Math.abs(device.getdNorth() - reconstructed[idx][0]);
+                double resE = Math.abs(device.getdEast() - reconstructed[idx][1]);
+                double resU = Math.abs(device.getdUp() - reconstructed[idx][2]);
+                madExceed = (madN > 0 && resN > config.outlierThreshold * madN)
+                        || (madE > 0 && resE > config.outlierThreshold * madE)
+                        || (madU > 0 && resU > config.outlierThreshold * madU);
+            }
+
+            boolean sameDirSafe = sameDirRatio >= config.spatialSameDirectionThreshold;
+
+            boolean isOutlier = directionOpposite && absoluteExceed && madExceed && !sameDirSafe;
+
+            if (isOutlier) {
+                r.setOutlier(true);
+                r.setOutlierReason(buildReason(oppositeN, oppositeE, oppositeU,
+                        absDevN, absDevE, absDevU, nbMedN, nbMedE, nbMedU, sameDirRatio));
+                r.setReplacedN(nbMedN);
+                r.setReplacedE(nbMedE);
+                r.setReplacedU(nbMedU);
             } else {
-                double devN = Math.abs(device.getdNorth() - medN);
-                double devE = Math.abs(device.getdEast() - medE);
-                double devU = Math.abs(device.getdUp() - medU);
-                boolean isOutlier = devN > config.spatialOutlierThreshold
-                        || devE > config.spatialOutlierThreshold
-                        || devU > config.spatialOutlierThreshold;
-
-                r.setOutlier(isOutlier);
-                if (isOutlier) {
-                    r.setOutlierReason("Layer6: spatial outlier (median fallback)");
-                    r.setReplacedN(medN);
-                    r.setReplacedE(medE);
-                    r.setReplacedU(medU);
-                } else {
-                    r.setOutlierReason("");
-                    r.setReplacedN(device.getdNorth());
-                    r.setReplacedE(device.getdEast());
-                    r.setReplacedU(device.getdUp());
-                }
+                r.setOutlier(false);
+                r.setOutlierReason("");
+                passThrough(device, r);
             }
 
             results.add(r);
         }
 
         return results;
+    }
+
+    private void passThrough(SpatialGroupInput device, SpatialCheckResult r) {
+        r.setReplacedN(device.getdNorth());
+        r.setReplacedE(device.getdEast());
+        r.setReplacedU(device.getdUp());
+    }
+
+    private String buildReason(boolean oppositeN, boolean oppositeE, boolean oppositeU,
+                               double absDevN, double absDevE, double absDevU,
+                               double nbMedN, double nbMedE, double nbMedU, double sameDirRatio) {
+        StringBuilder sb = new StringBuilder("Layer6: spatial outlier (neighbor-median replace)");
+        if (oppositeN) sb.append(" N=").append(String.format("%.4f", absDevN))
+                .append("(med=").append(String.format("%.4f", nbMedN)).append(")");
+        if (oppositeE) sb.append(" E=").append(String.format("%.4f", absDevE))
+                .append("(med=").append(String.format("%.4f", nbMedE)).append(")");
+        if (oppositeU) sb.append(" U=").append(String.format("%.4f", absDevU))
+                .append("(med=").append(String.format("%.4f", nbMedU)).append(")");
+        sb.append(" sameDir=").append(String.format("%.2f", sameDirRatio));
+        return sb.toString();
     }
 
     @Override
@@ -190,19 +245,17 @@ public class PcaSpatialCheckService implements SpatialCheckService {
         }
     }
 
-    private double computeSameDirectionRatio(SpatialGroupInput device, List<SpatialGroupInput> all) {
+    private double computeSameDirectionRatio(SpatialGroupInput device, List<SpatialGroupInput> neighbors) {
+        if (neighbors.isEmpty()) return 1.0;
         int sameDir = 0;
-        int count = 0;
-        for (SpatialGroupInput nb : all) {
-            if (nb.getDeviceId().equals(device.getDeviceId())) continue;
-            count++;
+        for (SpatialGroupInput nb : neighbors) {
             if (device.getdNorth() * nb.getdNorth() >= 0
                     && device.getdEast() * nb.getdEast() >= 0
                     && device.getdUp() * nb.getdUp() >= 0) {
                 sameDir++;
             }
         }
-        return count == 0 ? 1.0 : (double) sameDir / count;
+        return (double) sameDir / neighbors.size();
     }
 
     private double median(double[] values) {

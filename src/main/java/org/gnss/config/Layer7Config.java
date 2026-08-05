@@ -99,6 +99,9 @@ public class Layer7Config {
     /** 变点前后均值差阈值（米），默认：0.03 */
     public double changePointMinShift = 0.03;
 
+    /** 变点检测数据查询回溯时长（分钟），默认：120 */
+    public int changePointScanLookbackMinutes = 120;
+
     /** 是否自动应用修正，默认：false */
     public boolean changePointAutoApply = false;
 

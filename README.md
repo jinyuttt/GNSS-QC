@@ -16,7 +16,7 @@ GNSS-QC 是一个用于 GNSS 变形监测数据质量控制的七层递进式清
 | **L3** | 统计粗差 | Hampel/IQR/3σ 基础检测 + 小波残差双模检测 | 增强 |
 | **L4** | 值替换 | 单点中位数替换 + 连续粗差分段替换 + 无效数据段标记 | 升级 |
 | **L5** | 基线记忆 | LOESS 局部加权回归计算慢基线（替换原中位数方法） | 替换 |
-| **L6** | 空间校验 | PCA 主成分分析提取公共模式误差（替换原中位数方法） | 替换 |
+| **L6** | 空间校验 | PCA 计算公共模式残差 + 双阈值联合判决 + 邻居中位数替换 + 两种修复模式 | 重构 |
 | **L7** | 综合仲裁 | 加权综合异常分（WCS）判决 + 影子评测 | 保持 |
 | **L7b** | 异步变点检测 | Pettitt 检验异步扫描历史数据，检测结构突变点 | 新增（旁支） |
 
@@ -102,25 +102,36 @@ CUSUM- = max(0, CUSUM-_prev - (x - median) - K×MAD)
 
 ---
 
-### ✅ 空间滤波能力（PCA）—— 根治集体跑偏
+### ✅ 空间滤波能力（PCA）—— 根治集体跑偏与方向反转
 
-**实现方式**：基于 Hipparchus 的主成分分析
+**实现方式**：基于 Hipparchus 的主成分分析（仅计算公共模式残差，不再用重构值改写观测）
 
 **核心价值**：
-- 提取空间公共模式误差（如大气折射、多路径效应）
-- 消除同组测站的系统性偏差
-- 提升相对形变监测精度
+- 提取空间公共模式残差（pcaResidual），作为空间异常判决的辅助指标
+- 彻底解决 PCA 重构值方向反转问题（重构值不再作为替换输出）
+- 双阈值联合判决（相对 MAD + 绝对残差）+ 方向相反条件，解决低方差组误判
+- 同向邻居占比参与判决，允许测点真实局部位移
+- 替换值采用剔除自身后的邻居中位数，物理含义明确，不会出现符号反转
 
 **处理流程**：
 1. 收集同组测站位移数据
-2. PCA分解提取主成分（公共模式）
-3. 从各测站数据中减去公共模式分量
-4. 卫星数不足时fallback到中位数方法
+2. PCA 分解提取主成分，计算各测站公共模式残差（pcaResidual）
+3. 计算邻居中位数、同向占比、相对 MAD、绝对残差
+4. 联合判决：方向相反 && 相对MAD超限 && 绝对残差超限 && 同向占比<阈值 → 判为空间异常
+5. 异常时用剔除自身后的邻居中位数替换；否则透传 L5 结果
+6. 设备数不足 3 时 fallback 到 DefaultSpatialCheckService（中位数方法，同样应用方向+同向占比判决）
+
+**修复模式**：
+- `CAUTIOUS`（默认）：满足严格条件才替换
+- `NO_REPAIR`：L6 仅计算指标，直接透传 L5 结果，不修改任何数据
 
 **配置参数**：
 - pcaEnabled — 启用/禁用PCA空间校验
 - pcaWindowSize — PCA窗口大小（默认20）
 - pcaVarianceThreshold — 方差阈值（默认0.6）
+- spatialRepairMode — 修复模式（CAUTIOUS / NO_REPAIR，默认 CAUTIOUS）
+- spatialSameDirectionThreshold — 同向占比阈值（默认0.5，同向占比≥此值不替换）
+- spatialAbsoluteResidualThreshold — 绝对残差阈值（默认0.03m）
 
 ---
 
@@ -263,15 +274,19 @@ CUSUM- = max(0, CUSUM-_prev - (x - median) - K×MAD)
 
 #### PcaSpatialCheckService — L6 PCA空间校验服务
 
-基于 Hipparchus PCA 提取空间公共模式误差
+基于 Hipparchus PCA 计算公共模式残差，双阈值联合判决 + 邻居中位数替换
 
 | 方法 | 说明 |
 |------|------|
-| spatialCheck(List<SpatialGroupInput>) | PCA公共模式误差提取与修正 |
+| spatialCheck(List<SpatialGroupInput>) | PCA 残差计算 + 方向/同向占比/双阈值联合判决 + 邻居中位数替换 |
+
+**判决逻辑**：`方向相反 && 绝对残差超限 && 相对MAD超限 && 同向占比<阈值` 才判为空间异常
+
+**修复模式**：`CAUTIOUS`（谨慎替换）/ `NO_REPAIR`（仅计算指标，透传L5）
 
 #### DefaultSpatialCheckService — 空间校验默认实现（fallback）
 
-基于中位数的空间一致性校验
+基于中位数的空间一致性校验，设备数<3 时使用，同样应用方向相反 + 同向占比判决
 
 ### L7 综合仲裁组件（原有）
 
@@ -353,6 +368,9 @@ CUSUM- = max(0, CUSUM-_prev - (x - median) - K×MAD)
 | pcaEnabled | true | PCA空间校验开关 |
 | pcaWindowSize | 20 | PCA窗口大小 |
 | pcaVarianceThreshold | 0.6 | PCA方差阈值 |
+| spatialRepairMode | CAUTIOUS | L6修复模式（CAUTIOUS/NO_REPAIR） |
+| spatialSameDirectionThreshold | 0.5 | 同向占比阈值（≥此值不替换） |
+| spatialAbsoluteResidualThreshold | 0.03 | 绝对残差阈值（m） |
 | // 质量门控 | | |
 | enableRatioCheck | true | Ratio检查开关 |
 | ratioThreshold | 3.0 | Ratio阈值 |
@@ -375,6 +393,7 @@ CUSUM- = max(0, CUSUM-_prev - (x - median) - K×MAD)
 | changePointScanWindowSize | 60 | 扫描窗口大小 |
 | changePointMinPoints | 30 | 最小检测点数 |
 | changePointMinShift | 0.03 | 最小位移变化量（m） |
+| changePointScanLookbackMinutes | 120 | 变点检测数据查询回溯时长（分钟） |
 | changePointAutoApply | false | 是否自动应用修正 |
 | changePointAlert | true | 是否触发告警 |
 
@@ -494,13 +513,15 @@ src/main/java/org/gnss/
 │   ├── WaveletDenoiser.java             # L0小波去噪器
 │   ├── CusumDetector.java               # L2 CUSUM检测器
 │   ├── PcaSpatialCheckService.java      # L6 PCA空间校验
-│   ├── DefaultSpatialCheckService.java  # L6默认实现
+│   ├── DefaultSpatialCheckService.java  # L6默认实现（fallback）
 │   ├── ChangePointScanner.java          # L7b异步变点检测
+│   ├── CorrectionCallback.java          # 事后修正回调接口
 │   ├── Layer7Arbitrator.java            # L7综合仲裁器
 │   └── Layer7ArbitrationService.java    # L7仲裁接口
 ├── config/
 │   ├── CleanConfig.java                 # 清洗配置
 │   ├── Layer7Config.java                # L7配置
+│   ├── SpatialRepairMode.java           # L6修复模式枚举
 │   └── ...                              # 其他配置
 ├── model/
 │   ├── DisplacementResult.java          # 位移结果

@@ -548,42 +548,46 @@ public class DisplacementCleaner {
      * @return 清洗结果（未通过表示检测到粗差，需进入第4层值替换）
      */
     private CleanResult layer3StatisticalOutlier(DisplacementResult result, DeviceState state) {
-        // FLOAT解精度低，跳过统计检测，避免污染统计窗口
-        if (result.isDowngraded() && !result.isAbnormal()) {
-            return CleanResult.pass(result);
-        }
+        boolean isFloat = result.isDowngraded() && !result.isAbnormal();
 
         LinkedList<Double> nw = state.getNorthWindow();
         LinkedList<Double> ew = state.getEastWindow();
         LinkedList<Double> uw = state.getUpWindow();
 
-        // 窗口未满时的保守启动策略：使用初始基线 + 全局经验阈值判异
         if (nw.size() < config.windowSize) {
             if (state.isInitialBaselineEstablished()) {
                 double baselineN = state.getInitialBaselineNorth();
                 double baselineE = state.getInitialBaselineEast();
                 double baselineU = state.getInitialBaselineUp();
 
-                boolean baselineOutlier = Math.abs(result.getdNorth() - baselineN) > config.windowInitFallbackSigma
-                        || Math.abs(result.getdEast() - baselineE) > config.windowInitFallbackSigma
-                        || Math.abs(result.getdUp() - baselineU) > config.windowInitFallbackSigma;
+                double fallbackThresh = isFloat
+                        ? config.windowInitFallbackSigma * config.floatHampelScale
+                        : config.windowInitFallbackSigma;
+
+                boolean baselineOutlier = Math.abs(result.getdNorth() - baselineN) > fallbackThresh
+                        || Math.abs(result.getdEast() - baselineE) > fallbackThresh
+                        || Math.abs(result.getdUp() - baselineU) > fallbackThresh;
 
                 if (baselineOutlier) {
-                    return CleanResult.fail(result, 3, "Window uninitialized, outlier vs baseline");
+                    return CleanResult.fail(result, 3, isFloat
+                            ? "FLOAT window uninitialized, outlier vs baseline"
+                            : "Window uninitialized, outlier vs baseline");
                 }
             }
-            // 窗口不足3条时直接放行
             if (nw.size() < 3) {
                 return CleanResult.pass(result);
             }
         }
 
+        double effectiveK = isFloat ? config.hampelK * config.floatHampelScale : config.hampelK;
+        double effectiveKV = isFloat ? config.hampelKVertical * config.floatHampelScale : config.hampelKVertical;
+
         boolean isOutlier = false;
 
         if (config.algorithm == Algorithm.HAMPEL) {
-            isOutlier = checkHampel(result.getdNorth(), nw, config.hampelK)
-                    || checkHampel(result.getdEast(), ew, config.hampelK)
-                    || checkHampel(result.getdUp(), uw, config.hampelKVertical);
+            isOutlier = checkHampel(result.getdNorth(), nw, effectiveK)
+                    || checkHampel(result.getdEast(), ew, effectiveK)
+                    || checkHampel(result.getdUp(), uw, effectiveKV);
         } else if (config.algorithm == Algorithm.IQR) {
             isOutlier = checkIQR(result.getdNorth(), nw, "N") || checkIQR(result.getdEast(), ew, "E")
                     || checkIQRVertical(result.getdUp(), uw, "U");
@@ -720,7 +724,8 @@ public class DisplacementCleaner {
      * 对窗口数据做线性拟合去趋势，返回残差序列（含当前值）
      * <p>
      * 线性拟合 y = a + b*x，残差 = y - (a + b*x)
-     * 当前值追加到窗口末尾参与拟合，返回全部残差
+     * 仅用窗口历史数据拟合趋势基线，当前值不参与拟合，
+     * 避免当前异常值拉偏拟合线导致漏检或误检。
      * </p>
      *
      * @param window      滑动窗口数据
@@ -728,11 +733,11 @@ public class DisplacementCleaner {
      * @return 残差数组，最后一个元素为当前值的残差
      */
     private double[] detrendedResiduals(LinkedList<Double> window, double currentValue) {
-        int n = window.size() + 1;
-        double[] residuals = new double[n];
+        int m = window.size();
+        double[] residuals = new double[m + 1];
 
         double sumX = 0, sumY = 0, sumXY = 0, sumX2 = 0;
-        for (int i = 0; i < window.size(); i++) {
+        for (int i = 0; i < m; i++) {
             double x = i;
             double y = window.get(i);
             sumX += x;
@@ -740,29 +745,21 @@ public class DisplacementCleaner {
             sumXY += x * y;
             sumX2 += x * x;
         }
-        {
-            double x = window.size();
-            double y = currentValue;
-            sumX += x;
-            sumY += y;
-            sumXY += x * y;
-            sumX2 += x * x;
-        }
 
-        double denom = n * sumX2 - sumX * sumX;
+        double denom = m * sumX2 - sumX * sumX;
         double b, a;
         if (Math.abs(denom) < 1e-15) {
-            a = sumY / n;
+            a = sumY / m;
             b = 0;
         } else {
-            b = (n * sumXY - sumX * sumY) / denom;
-            a = (sumY - b * sumX) / n;
+            b = (m * sumXY - sumX * sumY) / denom;
+            a = (sumY - b * sumX) / m;
         }
 
-        for (int i = 0; i < window.size(); i++) {
+        for (int i = 0; i < m; i++) {
             residuals[i] = window.get(i) - (a + b * i);
         }
-        residuals[window.size()] = currentValue - (a + b * window.size());
+        residuals[m] = currentValue - (a + b * m);
 
         return residuals;
     }

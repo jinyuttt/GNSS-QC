@@ -81,6 +81,9 @@ public class CleanConfig {
     /** Hampel高程方向阈值系数k（通常比水平方向宽松），默认：3.5 */
     public double hampelKVertical = 3.5;
 
+    /** FLOAT解Hampel阈值缩放系数，FLOAT解使用 k * floatHampelScale 作为阈值，默认：1.5 */
+    public double floatHampelScale = 1.5;
+
     // ========== 第五层：长期基线记忆 ==========
 
     /** 快速基线窗口大小（5分钟@1Hz），默认：300 */
@@ -203,6 +206,15 @@ public class CleanConfig {
 
     /** PCA第一主成分方差贡献率阈值，低于此值不扣除，默认：0.6 */
     public double pcaVarianceThreshold = 0.6;
+
+    /** L6 空间校验修复模式，默认：CAUTIOUS（谨慎修复） */
+    public SpatialRepairMode spatialRepairMode = SpatialRepairMode.CAUTIOUS;
+
+    /** 同向邻居占比阈值，同向占比≥此值时不触发替换（允许测点真实局部位移），默认：0.5 */
+    public double spatialSameDirectionThreshold = 0.5;
+
+    /** 空间异常绝对残差阈值（米），单分量残差超过此值才可能判异常，默认：0.03 */
+    public double spatialAbsoluteResidualThreshold = 0.03;
 
     public CleanConfig() {
     }

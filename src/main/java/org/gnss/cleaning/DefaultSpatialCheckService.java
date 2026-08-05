@@ -45,14 +45,20 @@ public class DefaultSpatialCheckService implements SpatialCheckService {
 
     private final double outlierThreshold;
     private final int minNeighbors;
+    private final double sameDirectionThreshold;
 
     public DefaultSpatialCheckService() {
-        this(0.03, 2);
+        this(0.03, 2, 0.5);
     }
 
     public DefaultSpatialCheckService(double outlierThreshold, int minNeighbors) {
+        this(outlierThreshold, minNeighbors, 0.5);
+    }
+
+    public DefaultSpatialCheckService(double outlierThreshold, int minNeighbors, double sameDirectionThreshold) {
         this.outlierThreshold = outlierThreshold;
         this.minNeighbors = minNeighbors;
+        this.sameDirectionThreshold = sameDirectionThreshold;
     }
 
     @Override
@@ -149,9 +155,18 @@ public class DefaultSpatialCheckService implements SpatialCheckService {
             double devN = Math.abs(device.getdNorth() - medN);
             double devE = Math.abs(device.getdEast() - medE);
             double devU = Math.abs(device.getdUp() - medU);
-            boolean isOutlier = devN > outlierThreshold
+            boolean absoluteExceed = devN > outlierThreshold
                     || devE > outlierThreshold
                     || devU > outlierThreshold;
+
+            boolean oppositeN = device.getdNorth() * medN < 0;
+            boolean oppositeE = device.getdEast() * medE < 0;
+            boolean oppositeU = device.getdUp() * medU < 0;
+            boolean directionOpposite = oppositeN || oppositeE || oppositeU;
+
+            boolean sameDirSafe = sameDirRatio >= sameDirectionThreshold;
+
+            boolean isOutlier = absoluteExceed && directionOpposite && !sameDirSafe;
 
             r.setOutlier(isOutlier);
             if (isOutlier) {

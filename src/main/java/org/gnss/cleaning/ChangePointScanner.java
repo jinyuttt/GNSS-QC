@@ -28,14 +28,17 @@ public class ChangePointScanner {
 
     private final Layer7Config config;
     private final HistoryDataProvider historyProvider;
+    private final CorrectionCallback correctionCallback;
     private ScheduledExecutorService scheduler;
     private final AtomicLong lastScanTime = new AtomicLong(0);
     private static final DateTimeFormatter ID_FORMATTER =
             DateTimeFormatter.ofPattern("yyyyMMddHHmmssSSS").withZone(ZoneOffset.UTC);
 
-    public ChangePointScanner(Layer7Config config, HistoryDataProvider historyProvider) {
+    public ChangePointScanner(Layer7Config config, HistoryDataProvider historyProvider,
+                              CorrectionCallback correctionCallback) {
         this.config = config;
         this.historyProvider = historyProvider;
+        this.correctionCallback = correctionCallback;
     }
 
     public void start() {
@@ -213,9 +216,20 @@ public class ChangePointScanner {
             record.setToTime(history.get(history.size() - 1).getTimestamp());
         }
 
+        double correctedN, correctedE, correctedU;
         List<DataCorrectionItem> corrections = new ArrayList<>();
         for (int i = changePoint; i < history.size(); i++) {
             DisplacementResult dr = history.get(i);
+            correctedN = dr.getdNorth();
+            correctedE = dr.getdEast();
+            correctedU = dr.getdUp();
+
+            switch (component) {
+                case "N" -> correctedN = dr.getdNorth() - shift;
+                case "E" -> correctedE = dr.getdEast() - shift;
+                case "U" -> correctedU = dr.getdUp() - shift;
+            }
+
             DataCorrectionItem item = new DataCorrectionItem();
             item.setDataId(dr.getDataId());
             item.setOriginalNorth(dr.getdNorth());
@@ -224,12 +238,9 @@ public class ChangePointScanner {
             item.setCleanedNorth(dr.getdNorth());
             item.setCleanedEast(dr.getdEast());
             item.setCleanedUp(dr.getdUp());
-
-            switch (component) {
-                case "N" -> item.setCorrectedNorth(dr.getdNorth() - shift);
-                case "E" -> item.setCorrectedEast(dr.getdEast() - shift);
-                case "U" -> item.setCorrectedUp(dr.getdUp() - shift);
-            }
+            item.setCorrectedNorth(correctedN);
+            item.setCorrectedEast(correctedE);
+            item.setCorrectedUp(correctedU);
             item.setReason("Change point correction: " + component + " shift=" + String.format("%.4f", shift));
             corrections.add(item);
         }
@@ -238,6 +249,15 @@ public class ChangePointScanner {
         if (config.changePointAlert) {
             System.out.println("[ChangePointScanner] ALERT: " + record.getCorrectionReason()
                     + " for station " + stationId);
+        }
+
+        if (correctionCallback != null) {
+            try {
+                correctionCallback.onCorrection(record);
+            } catch (Exception e) {
+                System.err.println("[ChangePointScanner] Correction callback failed for "
+                        + stationId + ": " + e.getMessage());
+            }
         }
     }
 

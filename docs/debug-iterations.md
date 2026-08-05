@@ -239,37 +239,154 @@ if self._score_threshold > 0 and len(self._score_history) >= 50:
 
 ---
 
-## 迭代 #2 — （待记录）
+## 迭代 #2 — L3 拟合污染致死循环 & L6 PCA 方向反转修复
 
-**日期**：  
-**数据来源**：  
-**问题描述**：  
+**日期**：2026-08-05  
+**数据来源**：GS2025090001，2026-08-05 全天数据（TDengine l7 表 + MySQL clean_result/clean_layer5_result）  
+**分析依据**：611 条 L7 记录、591 条 L1-passed L5 记录、图表 API 实时数据
 
-### 问题现象
+### 1. 问题现象
 
+| 维度 | 现象 | 严重程度 |
+|------|------|----------|
+| L5 北向值 | 484/611 条恒为 -0.003761（图表显示 -3.761mm），占比 79% | 🔴 严重 |
+| L6 替换值 | L5 正常值 +0.002393 被 L6 替换为 -0.011507（方向反转） | 🔴 严重 |
+| 原始数据 | disp_n ≈ 0.003（正常范围 -0.0009 ~ 0.0053） | 🟢 正常 |
+| 影子旁路 | candidate_n=0（1369/1375），特征 f6_ts_residual=13.2 异常大 | 🟡 中等 |
 
+### 2. 根因分析
 
-### 根因分析
+#### 2.1 🔴 L3 detrendedResiduals 让当前值参与拟合，导致 L4 死循环
 
+**代码位置**：`DisplacementCleaner.java` → `detrendedResiduals()` / `checkHampel()`
 
+**问题链路**：
+```
+窗口全是 L4 替换值 -0.003761（wasL4Replaced 已阻止更新 lastValid，但替换值仍入窗口）
+  → 当前原始值 0.003 与窗口一起参与线性拟合
+  → 拟合线被当前值拉偏，产生上升趋势
+  → 窗口点残差 ≈ ±0.001（小），当前值残差 ≈ 0.0056（大）
+  → MAD ≈ 0.0005（不为0，不触发 fallback）
+  → 阈值 = 2.5 × 0.0005 = 0.00125
+  → 0.0056 > 0.00125 → 判为异常 → L4 用中位数 -0.003761 替换
+  → 替换值入窗口 → 回到步骤1 → 死循环
+```
 
-### 修复方案
+**关键缺陷**：`detrendedResiduals` 将当前值加入窗口一起做线性拟合，导致：
+- 窗口全相同时，当前值参与拟合使拟合线被拉偏
+- 当前值残差被人为放大，窗口点残差被人为缩小
+- MAD 不为 0，无法触发 `windowInitFallbackSigma` 兜底
 
+#### 2.2 🔴 L6 PCA 重构值方向反转
 
+**代码位置**：`PcaSpatialCheckService.java` → `spatialCheck()`
 
-### 修改文件清单
+**问题链路**：
+```
+L5 输出正常值 +0.002393（+2.4mm，北向正向）
+  → PCA 提取群体共有主成分（群体大部分为负位移）
+  → PCA 重构值 = -0.011507（-11.5mm，北向负向）
+  → 方向完全相反！
+  → spatial_residual = 0.0706（7cm），same_direction_ratio = 0.5
+  → outlier 判断仅用相对 MAD（3.0 × MAD），未用方向/同向占比
+  → 判为异常 → 用 PCA 重构值 -0.011507 替换
+```
 
+**关键缺陷**：
+1. PCA 重构值是群体趋势投影，不是设备真实位移，方向可能反转
+2. `sameDirectionRatio` 计算了但未参与判决
+3. 仅用相对 MAD 阈值，低方差组（MAD 极小）时正常值也被判异常
+4. 替换值用 PCA 重构值（含自身数据），自身异常会污染重构结果
 
+### 3. 修复方案
 
-### 预期效果
+#### 修复 #1 (P0)：detrendedResiduals 当前值不参与拟合
 
+**文件**：`src/main/java/org/gnss/cleaning/DisplacementCleaner.java`
 
+**修改内容**：
+- `detrendedResiduals` 只用窗口历史数据建立趋势基线，当前值不参与拟合
+- 窗口全相同时残差全为 0 → MAD=0 → 触发 `windowInitFallbackSigma=0.01` 兜底
+- 阈值 = 2.5 × 0.01 = 0.025m = 25mm，原始值偏离仅 6.8mm < 25mm → 不判异常
 
-### 待验证项
+#### 修复 #2 (P0)：L6 PCA 废弃重构值作为替换输出
 
-- [ ]
+**文件**：`src/main/java/org/gnss/cleaning/PcaSpatialCheckService.java`（重写）
 
-### 遗留问题
+**修改内容**：
+- PCA 依旧运行，仅用于计算公共模式残差 `pcaResidual`（保存到 `SpatialCheckResult#pcaResidual`）
+- 不再用重构值改写观测，彻底解决方向反转问题
+
+#### 修复 #3 (P0)：sameDirectionRatio 参与判决
+
+**修改内容**：
+- 同向占比 ≥ `spatialSameDirectionThreshold`（0.5）时不触发替换
+- 允许测点真实局部位移，指标原样输出给上层
+
+#### 修复 #4 (P0)：双阈值联合判决
+
+**修改内容**：
+- 只有同时满足三个条件才判空间异常：
+  - `directionOpposite`：设备与邻居中位数方向相反
+  - `absoluteExceed`：绝对残差 > `spatialAbsoluteResidualThreshold`（3cm）
+  - `madExceed`：相对 MAD 超限（`outlierThreshold × MAD`）
+- 解决低方差组 MAD 误判
+
+#### 修复 #5 (P0)：替换值改为剔除自身后的邻居中位数
+
+**修改内容**：
+- `replacedN/E/U` 由剔除自身后的邻居中位数计算
+- 物理含义明确，不会出现符号反转
+- 规避待测站自身异常污染 PCA 矩阵的连锁问题
+
+#### 修复 #6 (P1)：两种修复模式
+
+**文件**：`src/main/java/org/gnss/config/SpatialRepairMode.java`（新建）
+
+**修改内容**：
+- `CAUTIOUS`（默认）：满足严格条件才替换
+- `NO_REPAIR`：L6 仅计算指标，直接透传 L5 结果，不修改任何数据
+
+#### 修复 #7 (P2)：DefaultSpatialCheckService 同步判决逻辑
+
+**文件**：`src/main/java/org/gnss/cleaning/DefaultSpatialCheckService.java`
+
+**修改内容**：
+- fallback 路径（设备数<3）也加入方向相反 + 同向占比判断
+- 保持与 PCA 路径逻辑一致
+
+### 4. 修改文件清单
+
+| 文件 | 修改行数 | 类型 |
+|------|----------|------|
+| `src/main/java/org/gnss/cleaning/DisplacementCleaner.java` | +30/-29 | Java |
+| `src/main/java/org/gnss/cleaning/PcaSpatialCheckService.java` | +120/-41 | Java（重写） |
+| `src/main/java/org/gnss/cleaning/DefaultSpatialCheckService.java` | +13/-6 | Java |
+| `src/main/java/org/gnss/config/CleanConfig.java` | +12/-0 | Java |
+| `src/main/java/org/gnss/config/SpatialRepairMode.java` | +11/-0 | Java（新建） |
+| `src/main/java/org/gnss/model/SpatialCheckResult.java` | +6/-0 | Java |
+
+### 5. 预期效果
+
+| 指标 | 修复前 | 修复后预期 |
+|------|--------|------------|
+| L5 北向值 | 79% 恒为 -0.003761 | 恢复为真实测量值（≈0.003） |
+| L6 替换 | 正常值被反向替换为 -0.011507 | 方向相反+双阈值超限才替换 |
+| 图表显示 | 长时间固定 -3.761mm | 跟随真实位移波动 |
+| 影子 f6_ts_residual | 13.2（异常大） | 恢复正常范围 |
+| 影子 f10_window_stability | 0（异常小） | 恢复正常范围 |
+
+### 6. 待验证项
+
+- [ ] 重启服务后，L5 不再出现 -0.003761 固定值
+- [ ] L6 不再将正向 L5 值替换为负向值
+- [ ] 图表 clean 曲线跟随真实位移波动
+- [ ] 影子旁路特征值恢复正常
+- [ ] NO_REPAIR 模式下 L6 完全透传 L5
+
+### 7. 遗留问题
 
 | 问题 | 说明 | 优先级 |
 |------|------|--------|
+| L4 中位数替换值仍入窗口 | wasL4Replaced 已阻止更新 lastValid，但替换值仍参与窗口中位数计算，可能影响后续检测 | P2 |
+| OutlierPostProcessor 全局 MAD 兜底 | 已添加全局 median/MAD fallback 处理平台型离群点，需验证长期效果 | P2 |

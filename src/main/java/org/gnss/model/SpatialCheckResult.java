@@ -17,6 +17,9 @@ public class SpatialCheckResult {
     private boolean outlier;
     private String outlierReason;
 
+    /** PCA 公共模式残差（观测值与PCA重构值之差的标量综合，三轴残差绝对值之和） */
+    private double pcaResidual;
+
     private double replacedN;
     private double replacedE;
     private double replacedU;
@@ -55,4 +58,7 @@ public class SpatialCheckResult {
 
     public int getNeighborCount() { return neighborCount; }
     public void setNeighborCount(int neighborCount) { this.neighborCount = neighborCount; }
+
+    public double getPcaResidual() { return pcaResidual; }
+    public void setPcaResidual(double pcaResidual) { this.pcaResidual = pcaResidual; }
 }
