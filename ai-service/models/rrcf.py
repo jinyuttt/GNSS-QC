@@ -5,6 +5,7 @@ import json
 import numpy as np
 import os
 import pickle
+import threading
 from typing import Dict, List, Optional
 
 
@@ -29,6 +30,7 @@ class RRCFModel:
         self._max_pool = 5000
         self._score_threshold = 0.0
         self._score_history = []
+        self._lock = threading.Lock()
 
     def _build_tree(self, data: np.ndarray) -> Dict:
         """递归构建一棵随机割树"""
@@ -137,28 +139,29 @@ class RRCFModel:
             features_list: 新特征数据列表
             rebuild: 是否重建森林。训练时True，推理时False避免性能开销
         """
-        new_points = np.array([self._feature_to_array(f) for f in features_list])
+        with self._lock:
+            new_points = np.array([self._feature_to_array(f) for f in features_list])
 
-        if self._sample_pool is None:
-            self._sample_pool = new_points.copy()
-            self._pool_size = len(new_points)
-        else:
-            self._sample_pool = np.vstack([self._sample_pool, new_points])
-            self._pool_size = len(self._sample_pool)
+            if self._sample_pool is None:
+                self._sample_pool = new_points.copy()
+                self._pool_size = len(new_points)
+            else:
+                self._sample_pool = np.vstack([self._sample_pool, new_points])
+                self._pool_size = len(self._sample_pool)
 
-        if self._pool_size > self._max_pool:
-            keep = self._max_pool
-            idx = self.rng.choice(self._pool_size, keep, replace=False)
-            self._sample_pool = self._sample_pool[idx]
-            self._pool_size = keep
+            if self._pool_size > self._max_pool:
+                keep = self._max_pool
+                idx = self.rng.choice(self._pool_size, keep, replace=False)
+                self._sample_pool = self._sample_pool[idx]
+                self._pool_size = keep
 
-        self._point_count += len(features_list)
+            self._point_count += len(features_list)
 
-        if rebuild:
-            self._rebuild_forest()
+            if rebuild:
+                self._rebuild_forest()
 
-        if self._point_count % 500 == 0:
-            self._update_threshold()
+            if self._point_count % 500 == 0:
+                self._update_threshold()
 
     def _update_threshold(self):
         """根据历史分数分布动态调整阈值"""
@@ -170,9 +173,10 @@ class RRCFModel:
 
     def record_score(self, score: float):
         """记录推理分数，用于动态阈值校准"""
-        self._score_history.append(score)
-        if len(self._score_history) > 2000:
-            self._score_history = self._score_history[-2000:]
+        with self._lock:
+            self._score_history.append(score)
+            if len(self._score_history) > 2000:
+                self._score_history = self._score_history[-2000:]
     def save(self, dirpath: str):
         os.makedirs(dirpath, exist_ok=True)
         state = {

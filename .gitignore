@@ -37,3 +37,16 @@ build/
 
 ### Mac OS ###
 .DS_Store
+
+### Python ###
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.bak
+*.swp
+
+### AI Service runtime data ###
+ai-service/data/*.db
+ai-service/data/*.db-journal
+ai-service/model_store/
