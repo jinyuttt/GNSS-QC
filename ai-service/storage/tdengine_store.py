@@ -79,7 +79,7 @@ class TdengineStore(StorageProvider):
             self._execute(
                 f"CREATE DATABASE IF NOT EXISTS {self.database} "
                 f"PRECISION 'ms' KEEP {max(self.full_ttl_days, 30)} "
-                f"BUFFER 96 WAL_LEVEL 1",
+                f"BUFFER 16 WAL_LEVEL 1",
                 database=None,
             )
 
