@@ -1,8 +1,25 @@
 package org.gnss.model;
 
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.List;
+
 /**
  * 清洗结果
  * <p>包含清洗后的位移结果、通过状态、失败原因和失败层级</p>
+ *
+ * <h3>层结果链</h3>
+ * <p>每层输出一个 {@link LayerResult}，记录该层的通过状态、替换值、替换方式。
+ * 通过 {@link #getLayerResults()} 可追溯完整清洗轨迹。</p>
+ *
+ * <h3>汇总替换标记</h3>
+ * <p>{@link #replacementSummary} 汇总最终值的来源，如：</p>
+ * <ul>
+ *   <li>{@code null}：原始值未替换</li>
+ *   <li>{@code "L1:LAST_VALID"}：L1 被拒，用上一个合法值替换</li>
+ *   <li>{@code "L4:MEDIAN"}：L3 检测粗差，L4 用窗口中位数替换</li>
+ *   <li>{@code "L4:LAST_VALID"}：L3 检测粗差，L4 用上一个合法值替换</li>
+ * </ul>
  */
 public class CleanResult {
 
@@ -17,6 +34,12 @@ public class CleanResult {
 
     /** 失败层级（1=质量门禁, 2=跳变检测, 3=粗差检测, 4=值替换, 5=基线记忆, 7=综合仲裁），默认：0 */
     private int failureLayer;
+
+    /** 各层清洗结果（L1~L5），不可变列表 */
+    private List<LayerResult> layerResults = new ArrayList<>();
+
+    /** 汇总替换标记，如 "L1:LAST_VALID"、"L4:MEDIAN"、null=原始值 */
+    private String replacementSummary;
 
     /** 结果是否带有异常标记（即使清洗通过也可能保留），默认：false */
     private boolean resultAbnormal;
@@ -383,4 +406,26 @@ public class CleanResult {
 
     public boolean isInvalidDataSegment() { return invalidDataSegment; }
     public void setInvalidDataSegment(boolean invalidDataSegment) { this.invalidDataSegment = invalidDataSegment; }
+
+    public List<LayerResult> getLayerResults() { return Collections.unmodifiableList(layerResults); }
+
+    public void addLayerResult(LayerResult lr) {
+        this.layerResults.add(lr);
+    }
+
+    public void setLayerResults(List<LayerResult> layerResults) {
+        this.layerResults = new ArrayList<>(layerResults);
+    }
+
+    public LayerResult getLayerResult(int layer) {
+        for (LayerResult lr : layerResults) {
+            if (lr.getLayer() == layer) return lr;
+        }
+        return null;
+    }
+
+    public String getReplacementSummary() { return replacementSummary; }
+    public void setReplacementSummary(String replacementSummary) { this.replacementSummary = replacementSummary; }
+
+    public boolean isReplaced() { return replacementSummary != null; }
 }

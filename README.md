@@ -17,15 +17,17 @@ GNSS-QC 是一个用于 GNSS 变形监测数据质量控制的七层递进式清
 | **L4** | 值替换 | 单点中位数替换 + 连续粗差分段替换 + 无效数据段标记 | 升级 |
 | **L5** | 基线记忆 | LOESS 局部加权回归计算慢基线（替换原中位数方法） | 替换 |
 | **L6** | 空间校验 | PCA 计算公共模式残差 + 双阈值联合判决 + 邻居中位数替换 + 两种修复模式 | 重构 |
-| **L7** | 综合仲裁 | 加权综合异常分（WCS）判决 + 影子评测 | 保持 |
-| **L7b** | 异步变点检测 | Pettitt 检验异步扫描历史数据，检测结构突变点 | 新增（旁支） |
+| **L7** | 综合仲裁 | 加权综合异常分（WCS）判决 + 三项判决 + 趋势保护 | 重构 |
+| **L7s** | 影子评测（旁支） | RRCF + LSTM+Attention 双模型融合推理，候选修正值仅写影子表 | 新增（旁支） |
+| **L8** | 事后检验（旁支） | Pettitt 非参数变点检验，异步定时扫描外部存储，检测结构突变点 | 新增（旁支） |
 
 ### 分层设计原则
 
 1. **递进式过滤**：每一层基于前一层的输出进行处理，逐步提升数据质量
 2. **可配置性**：每层功能均可独立启用/禁用，参数可配置
 3. **状态管理**：通过 DeviceState 维护设备级别的历史状态
-4. **旁路设计**：L7b 异步变点检测不影响实时清洗流程
+4. **旁路设计**：L7s 影子评测和 L8 事后检验均为旁支，不影响实时清洗主链路
+5. **清洗轨迹**：每层输出 LayerResult 记录通过状态、替换值、替换方式、失败原因，汇总到 CleanResult.layerResults 实现完整追溯
 
 ### 数据流程图
 
@@ -46,18 +48,190 @@ L5 LOESS慢基线
     ↓
 L6 PCA空间校验
     ↓
-L7 综合仲裁（WCS + 影子评测）
+L7 综合仲裁（WCS + 三项判决 + 趋势保护）
     ↓
-清洗结果输出
+清洗结果输出（含 layerResults 清洗轨迹）
+    ↓
+historyProvider.saveHistory() → 外部存储（Redis/时序库）
 
-┌─────────────────────────────────────────────────────────────┐
-│  L7b 异步变点检测（旁支）                                   │
-│  ┌─────────────────────────────────────────────────────┐   │
-│  │  定期扫描历史数据 → Pettitt检验 → 检测变点 → 告警/记录  │   │
-│  └─────────────────────────────────────────────────────┘   │
-└─────────────────────────────────────────────────────────────┘
+┌──────────────────────────────────────────────────────────────────────┐
+│  L7s 影子评测（旁支）                                                │
+│  ┌──────────────────────────────────────────────────────────────┐   │
+│  │  同步：CleanResult → 10维特征 → RRCF+LSTM推理 → 候选修正值    │   │
+│  │  候选修正值仅写影子表，永不替换线上正式数据                       │   │
+│  └──────────────────────────────────────────────────────────────┘   │
+└──────────────────────────────────────────────────────────────────────┘
+
+┌──────────────────────────────────────────────────────────────────────┐
+│  L8 事后检验（旁支，独立异步）                                       │
+│  ┌──────────────────────────────────────────────────────────────┐   │
+│  │  定时查询外部存储 → Pettitt检验 → 检测变点 → 生成修正记录       │   │
+│  │  通过 CorrectionCallback 持久化，可回溯修正线上数据              │   │
+│  └──────────────────────────────────────────────────────────────┘   │
+└──────────────────────────────────────────────────────────────────────┘
 `
 
+### L7 分支关系
+
+```
+                    ┌─────────────────────────────────────┐
+                    │       L7 综合仲裁（主链路）           │
+                    │  WCS分数 → 三项判决 → 趋势保护        │
+                    └────────┬────────────┬──────────────┘
+                             │            │
+                    ┌────────▼──────┐  ┌──▼──────────────────┐
+                    │ L7s 影子评测   │  │ L8 事后检验          │
+                    │ (同步旁支)     │  │ (异步旁支)           │
+                    │               │  │                      │
+                    │ 每历元同步推理  │  │ 定时查外部存储        │
+                    │ 写影子表       │  │ 生成修正记录          │
+                    │ 不替换线上数据  │  │ 可修正线上数据        │
+                    └───────────────┘  └──────────────────────┘
+```
+
+
+## 清洗轨迹追溯
+
+每层清洗独立输出 `LayerResult`，汇总到 `CleanResult.layerResults`，实现完整清洗过程可追溯。
+
+### LayerResult 结构
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| layer | int | 层级编号（1~7） |
+| passed | boolean | 是否通过 |
+| valueN/E/U | double | 该层输出的位移值 |
+| replacementMethod | enum | 替换方式（LAST_VALID / MEDIAN / MEAN / INITIAL_BASELINE） |
+| reason | String | 未通过原因 |
+| stepFlag | double | 阶跃标记 |
+
+### 替换方式枚举
+
+| 方法 | 说明 | 适用层 |
+|------|------|--------|
+| LAST_VALID | 上一合法值替换 | L1 |
+| MEDIAN | 窗口中位数替换 | L4, L6, L7 |
+| MEAN | 窗口均值替换 | L4 |
+| INITIAL_BASELINE | 初始基线替换 | L5 |
+
+### CleanResult 汇总
+
+| 字段 | 说明 |
+|------|------|
+| layerResults | 各层 LayerResult 列表（List\<LayerResult\>） |
+| replacementSummary | 替换汇总标记（如 "L1:LAST_VALID" 或 "L4:MEDIAN"） |
+
+### 各层 LayerResult 产出
+
+| 层级 | 产出方式 | 替换触发条件 |
+|------|----------|-------------|
+| L1 | layer1QualityGate 返回 LayerResult | 质量不达标时用 lastValid 替换 |
+| L2 | 构造 LayerResult.builder(2) | 仅标记，不替换 |
+| L3 | 构造 LayerResult.builder(3) | 仅标记，不替换 |
+| L4 | layer4AnomalyReplacement 返回 LayerResult | L3 检测到粗差时用中位数/均值替换 |
+| L5 | 构造 LayerResult.builder(5) | 仅标记阶跃，不替换 |
+| L6 | SpatialCheckResult.toLayerResult() | 空间异常时用邻居中位数替换 |
+| L7 | Layer7ArbitrationResult.toLayerResult() | 三项判决全满足时用历史低分点中位数替换 |
+
+---
+
+## L7s 影子评测（旁支）
+
+独立部署的微服务，与主清洗服务解耦，关停不影响主链路。基于 RRCF + LSTM+Attention 双模型融合架构。
+
+### 双环路设计
+
+| 环路 | 功能 | 频率 | SLA |
+|------|------|------|-----|
+| 环路1 | 同步实时推理 + 生成候选修正数据 | 每历元 | ≤50ms |
+| 环路2 | 增量学习 + 模型自动迭代 + 无感知热加载 | 5分钟 | - |
+
+### 10维语义特征向量
+
+| 特征 | 来源层 | 含义 |
+|------|--------|------|
+| F1~F3 | L5/L6 | N/E/U 位移值 |
+| F4~F5 | L2 | 水平/垂直变化率 |
+| F6 | L3 | 时序标准化残差 |
+| F7 | L6 | 空间残差（无则置0） |
+| F8 | L6 | 同向邻居占比（无则置0） |
+| F9 | L1 | 解算质量分 |
+| F10 | 历史 | 窗口稳定度（40条 max-min） |
+
+### 推理判定规则
+
+- RRCF 识别为突变 **且** LSTM 判定为非真实形变 **且** 置信度 ≥ 0.7 → 生成候选修正值
+- 判定为真实滑坡形变 → 不生成修正值，仅标记告警
+- 结论冲突 / 置信度不足 → 标记待人工复核
+
+### 形变类型
+
+| 类型 | 说明 |
+|------|------|
+| PSEUDO_DEFORMATION | 伪形变（多径等引起） |
+| REAL_DEFORMATION | 真实滑坡形变 |
+| UNCERTAIN | 不确定，需人工复核 |
+
+### 候选修正值类型
+
+| 类型 | 说明 | 适用场景 |
+|------|------|----------|
+| TIME_SERIES_PREDICTION | LSTM 时序预测 | 单点异常 |
+| NEIGHBOR_INTERPOLATION | 邻域插值 | 连续短时异常（≤20历元） |
+| NONE | 不生成 | 长时段失锁（>20历元） |
+
+### 核心约束
+
+- **候选修正值仅写入独立影子表，永不替换线上正式数据**
+- 服务不可用或异常时静默返回 null，不影响主链路
+- Python 服务端实现 RRCF + LSTM+Attention，HTTP API 对外提供推理
+
+---
+
+## L8 事后检验（旁支）
+
+完全独立的异步旁路，定时从外部存储拉取历史数据，检测 L3/L4 可能漏掉的隐藏漂移块。
+
+### 运行机制
+
+```
+ChangePointScanner.start()
+  → ScheduledExecutorService（每 N 分钟触发）
+    → historyProvider.getActiveStationIds()    // 查活跃测站
+      → historyProvider.queryRecent(stationId, windowSize)  // 查最近窗口历史
+        → Pettitt 非参数变点检验（N/E/U 三分量）
+          → 检测到变点（p < 0.05）且偏移量 ≥ 阈值
+            → 生成 DataCorrectionRecord
+              → CorrectionCallback.onCorrection(record)  // 持久化到数据库
+```
+
+### 与主链路的关系
+
+主链路每历元通过 `historyProvider.saveHistory()` 写入外部存储，L8 定时从同一存储读取——**主链路写，L8 读，完全解耦**。
+
+### 与 L7s 影子评测的区别
+
+| 维度 | L7s 影子评测 | L8 事后检验 |
+|------|-------------|-------------|
+| 触发方式 | 同步，每历元 | 异步，定时扫描 |
+| 算法 | RRCF + LSTM（Python） | Pettitt 检验（Java） |
+| 输出 | 候选修正值（影子表，不替换线上） | 修正记录（可回溯修正线上数据） |
+| 目的 | 效果评估 + 模型迭代 | 发现漏检漂移块，事后修正 |
+| 对线上数据影响 | **无** | **有**（通过 CorrectionCallback） |
+| LayerResult 适配 | 不适用（旁路影子表） | 不适用（跨历元批量修正） |
+
+### DataCorrectionRecord 结构
+
+| 字段 | 说明 |
+|------|------|
+| correctionId | 修正ID（格式：YYYYMMDDHHmmSS_CP） |
+| deviceId | 设备ID |
+| fromDataId / toDataId | 修正范围 |
+| type | 修正类型（TREND_MISJUDGE） |
+| corrections | 逐历元修正值列表（DataCorrectionItem） |
+| status | 修正状态（APPLIED / PENDING） |
+
+---
 
 ## 增强功能清单
 
@@ -211,7 +385,7 @@ CUSUM- = max(0, CUSUM-_prev - (x - median) - K×MAD)
 | 空间校验 | 中位数方法 | PCA主成分分析 |
 | 基线拟合 | 中位数 | LOESS回归 |
 | 粗差修复 | 单点替换 | 分段智能修复 |
-| 事后复核 | 无 | 异步变点检测 |
+| 事后复核 | 无 | L8 异步变点检测 |
 ## 核心组件
 
 ### 清洗引擎接口
@@ -301,7 +475,7 @@ CUSUM- = max(0, CUSUM-_prev - (x - median) - K×MAD)
 
 #### Layer7ArbitrationService — 第七层仲裁接口
 
-### L7b 异步变点检测组件（新增旁支）
+### L8 事后检验组件（旁支）
 
 #### ChangePointScanner — 异步变点检测器
 
@@ -319,7 +493,7 @@ CUSUM- = max(0, CUSUM-_prev - (x - median) - K×MAD)
 ### 配置接口
 
 #### CleanConfig — 清洗配置（L0-L6）
-#### Layer7Config — L7/L7b配置
+#### Layer7Config — L7/L7s/L8配置
 #### CacheConfig — 缓存配置
 #### GnssConfig — GNSS解算配置
 
@@ -328,16 +502,22 @@ CUSUM- = max(0, CUSUM-_prev - (x - median) - K×MAD)
 | 类名 | 说明 |
 |------|------|
 | DisplacementResult | 位移结果（含去噪后字段） |
-| CleanResult | 清洗结果（含漂移怀疑、置信度） |
+| CleanResult | 清洗结果（含漂移怀疑、置信度、layerResults清洗轨迹、replacementSummary） |
+| LayerResult | 单层清洗结果（层级、通过状态、替换值、替换方式、原因） |
 | DeviceState | 设备状态（含小波缓冲、CUSUM累加器等） |
 | SpatialGroupInput | 空间校验组输入 |
-| SpatialCheckResult | 空间校验结果 |
-| Layer7ArbitrationResult | 第七层仲裁结果 |
+| SpatialCheckResult | 空间校验结果（含toLayerResult方法） |
+| Layer7ArbitrationResult | 第七层仲裁结果（含toLayerResult方法） |
+| ShadowFeatureVector | 影子评测10维特征向量 |
+| ShadowEvaluationResult | 影子评测推理结果（含DeformType、RiskLevel、候选修正值） |
+| DataCorrectionRecord | L8事后修正记录 |
+| DataCorrectionItem | 逐历元修正值 |
 
 ### 持久化接口
 
 #### PersistenceCallback — 持久化回调接口
-#### HistoryDataProvider — 历史数据接口（含L7b查询方法）
+#### HistoryDataProvider — 历史数据接口（主链路写，L8读）
+#### CorrectionCallback — L8事后修正回调接口
 
 ## 配置参数
 
@@ -381,14 +561,16 @@ CUSUM- = max(0, CUSUM-_prev - (x - median) - K×MAD)
 | minSatellites | 5 | 最小卫星数 |
 | enableSpatialCheck | true | 空间校验开关 |
 
-### Layer7Config — L7配置
+### Layer7Config — L7/L7s/L8配置
 
 | 参数 | 默认值 | 说明 |
 |------|--------|------|
 | enabled | true | L7综合仲裁开关 |
-| enableShadowBranch | false | 影子评测开关 |
-| // L7b 异步变点检测 | | |
-| changePointDetectionEnabled | false | L7b变点检测开关 |
+| enableShadowBranch | false | L7s影子评测开关 |
+| shadowConfidenceThreshold | 0.7 | 影子评测置信度阈值 |
+| shadowMaxContinuousErr | 20 | 超长异常区间不生成修正值（历元数） |
+| // L8 事后检验 | | |
+| changePointDetectionEnabled | false | L8变点检测开关 |
 | changePointScanIntervalMinutes | 30 | 扫描间隔（分钟） |
 | changePointScanWindowSize | 60 | 扫描窗口大小 |
 | changePointMinPoints | 30 | 最小检测点数 |
@@ -415,7 +597,7 @@ CUSUM- = max(0, CUSUM-_prev - (x - median) - K×MAD)
 CleanConfig cleanConfig = new CleanConfig();
 Layer7Config layer7Config = new Layer7Config();
 
-// 可选：启用L7b异步变点检测
+// 可选：启用L8事后检验（异步变点检测）
 layer7Config.changePointDetectionEnabled = true;
 layer7Config.changePointScanIntervalMinutes = 30;
 
@@ -488,7 +670,7 @@ List<SpatialCheckResult> results = calculator.spatialCheck(groupInputs);
 calculator.shutdown();
 `
 
-### 6. L7b 异步变点检测配置
+### 6. L8 事后检验配置
 
 `java
 Layer7Config layer7Config = new Layer7Config();
@@ -509,28 +691,39 @@ src/main/java/org/gnss/
 ├── cache/
 │   └── DeviceStateCache.java            # 设备状态缓存
 ├── cleaning/
-│   ├── DisplacementCleaner.java         # 七层清洗器
+│   ├── DisplacementCleaner.java         # L1~L5七层清洗器
 │   ├── WaveletDenoiser.java             # L0小波去噪器
 │   ├── CusumDetector.java               # L2 CUSUM检测器
 │   ├── PcaSpatialCheckService.java      # L6 PCA空间校验
 │   ├── DefaultSpatialCheckService.java  # L6默认实现（fallback）
-│   ├── ChangePointScanner.java          # L7b异步变点检测
-│   ├── CorrectionCallback.java          # 事后修正回调接口
 │   ├── Layer7Arbitrator.java            # L7综合仲裁器
-│   └── Layer7ArbitrationService.java    # L7仲裁接口
+│   ├── Layer7ArbitrationService.java    # L7仲裁接口
+│   ├── ShadowEvaluationMode.java        # L7s影子评测模式
+│   ├── ChangePointScanner.java          # L8事后检验（异步变点检测）
+│   └── CorrectionCallback.java          # L8事后修正回调接口
+├── shadow/
+│   ├── ShadowEvaluationService.java     # L7s影子评测服务接口
+│   ├── ShadowEvaluationClient.java      # L7s影子评测客户端
+│   └── HttpShadowEvaluationService.java # L7s HTTP实现（连接Python AI服务）
 ├── config/
-│   ├── CleanConfig.java                 # 清洗配置
-│   ├── Layer7Config.java                # L7配置
+│   ├── CleanConfig.java                 # 清洗配置（L0~L6）
+│   ├── Layer7Config.java                # L7/L7s/L8配置
+│   ├── ShadowEvaluationConfig.java      # L7s影子评测配置
 │   ├── SpatialRepairMode.java           # L6修复模式枚举
 │   └── ...                              # 其他配置
 ├── model/
 │   ├── DisplacementResult.java          # 位移结果
-│   ├── CleanResult.java                 # 清洗结果
+│   ├── CleanResult.java                 # 清洗结果（含layerResults轨迹）
+│   ├── LayerResult.java                 # 单层清洗结果
 │   ├── DeviceState.java                 # 设备状态
+│   ├── ShadowFeatureVector.java         # L7s 10维特征向量
+│   ├── ShadowEvaluationResult.java      # L7s推理结果
+│   ├── DataCorrectionRecord.java        # L8修正记录
+│   ├── DataCorrectionItem.java          # L8逐历元修正值
 │   └── ...                              # 其他模型
 └── persistence/
     ├── PersistenceCallback.java         # 持久化回调
-    └── HistoryDataProvider.java         # 历史数据接口
+    └── HistoryDataProvider.java         # 历史数据接口（主链路写，L8读）
 
 src/test/java/org/gnss/
 ├── DisplacementCalculatorTest.java      # 单元测试

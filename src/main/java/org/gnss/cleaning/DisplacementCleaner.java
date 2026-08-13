@@ -6,6 +6,7 @@ import org.gnss.config.Algorithm;
 import org.gnss.model.CleanResult;
 import org.gnss.model.DeviceDiagnosis;
 import org.gnss.model.DeviceState;
+import org.gnss.model.LayerResult;
 import org.gnss.model.DeviceState.DirectionRecord;
 import org.gnss.model.DisplacementResult;
 import org.gnss.model.SolutionStatus;
@@ -175,22 +176,64 @@ public class DisplacementCleaner {
         double timeSeriesResidual = computeTimeSeriesResidual(result, tempState);
         double windowStability = computeWindowStability(tempState);
 
-        CleanResult r1 = layer1QualityGate(result, tempState);
-        if (!r1.isPassed()) {
-            r1.setTimeSeriesResidual(timeSeriesResidual);
-            r1.setSolutionQuality(solutionQuality);
-            r1.setHorizontalChangeRate(horizontalChangeRate);
-            r1.setVerticalChangeRate(verticalChangeRate);
-            r1.setWindowStability(windowStability);
-            return r1;
+        List<LayerResult> layerResults = new ArrayList<>();
+        String replacementSummary = null;
+
+        LayerResult lr1 = layer1QualityGate(result, tempState);
+        layerResults.add(lr1);
+
+        if (!lr1.isPassed()) {
+            if (lr1.isReplaced()) {
+                result.setdNorth(lr1.getValueN());
+                result.setdEast(lr1.getValueE());
+                result.setdUp(lr1.getValueU());
+                replacementSummary = "L1:" + lr1.getReplacementMethod().name();
+            }
+            result.setAbnormal(true);
+            result.setAbnormalReason(lr1.getReason());
+            result.setCleaned(true);
+
+            CleanResult cr = CleanResult.fail(result, 1, lr1.getReason());
+            cr.setLayerResults(layerResults);
+            cr.setReplacementSummary(replacementSummary);
+            cr.setTimeSeriesResidual(timeSeriesResidual);
+            cr.setSolutionQuality(solutionQuality);
+            cr.setHorizontalChangeRate(horizontalChangeRate);
+            cr.setVerticalChangeRate(verticalChangeRate);
+            cr.setWindowStability(windowStability);
+            return cr;
         }
 
         CleanResult r3 = layer3StatisticalOutlier(result, tempState);
+        layerResults.add(LayerResult.builder(3)
+                .passed(r3.isPassed())
+                .values(result.getdNorth(), result.getdEast(), result.getdUp())
+                .reason(r3.isPassed() ? null : r3.getFailureReason())
+                .build());
+
         if (!r3.isPassed()) {
-            layer4AnomalyReplacement(result, tempState, r3);
+            LayerResult lr4 = layer4AnomalyReplacement(result, tempState, r3);
+            layerResults.add(lr4);
+            if (lr4.isReplaced()) {
+                result.setdNorth(lr4.getValueN());
+                result.setdEast(lr4.getValueE());
+                result.setdUp(lr4.getValueU());
+                replacementSummary = "L4:" + lr4.getReplacementMethod().name();
+            }
+        } else {
+            layerResults.add(LayerResult.builder(4)
+                    .passed(true)
+                    .values(result.getdNorth(), result.getdEast(), result.getdUp())
+                    .build());
         }
 
-        layer5BaselineMemory(result, tempState);
+        CleanResult r5 = layer5BaselineMemory(result, tempState);
+        layerResults.add(LayerResult.builder(5)
+                .passed(r5.isPassed())
+                .values(result.getdNorth(), result.getdEast(), result.getdUp())
+                .reason(r5.isPassed() ? null : r5.getFailureReason())
+                .stepFlag(r5.isPassed() ? 0.0 : 1.0)
+                .build());
 
         result.setCleaned(true);
 
@@ -200,6 +243,8 @@ public class DisplacementCleaner {
         } else {
             finalResult = CleanResult.pass(result);
         }
+        finalResult.setLayerResults(layerResults);
+        finalResult.setReplacementSummary(replacementSummary);
         finalResult.setTimeSeriesResidual(timeSeriesResidual);
         finalResult.setSolutionQuality(solutionQuality);
         finalResult.setHorizontalChangeRate(horizontalChangeRate);
@@ -248,17 +293,38 @@ public class DisplacementCleaner {
         timeSeriesResidual = computeTimeSeriesResidual(result, state);
         windowStability = computeWindowStability(state);
 
-        CleanResult r1 = layer1QualityGate(result, state);
-        if (!r1.isPassed()) {
-            r1.setTimeSeriesResidual(timeSeriesResidual);
-            r1.setSolutionQuality(solutionQuality);
-            r1.setHorizontalChangeRate(horizontalChangeRate);
-            r1.setVerticalChangeRate(verticalChangeRate);
-            r1.setWindowStability(windowStability);
-            return r1;
+        List<LayerResult> layerResults = new ArrayList<>();
+        String replacementSummary = null;
+
+        // ========== L1 质量门禁 ==========
+        LayerResult lr1 = layer1QualityGate(result, state);
+        layerResults.add(lr1);
+
+        if (!lr1.isPassed()) {
+            if (lr1.isReplaced()) {
+                result.setdNorth(lr1.getValueN());
+                result.setdEast(lr1.getValueE());
+                result.setdUp(lr1.getValueU());
+                replacementSummary = "L1:" + lr1.getReplacementMethod().name();
+            }
+            result.setAbnormal(true);
+            result.setAbnormalReason(lr1.getReason());
+            result.setCleaned(true);
+            epochCounter++;
+            updateWindows(result, state);
+
+            CleanResult cr = CleanResult.fail(result, 1, lr1.getReason());
+            cr.setLayerResults(layerResults);
+            cr.setReplacementSummary(replacementSummary);
+            cr.setTimeSeriesResidual(timeSeriesResidual);
+            cr.setSolutionQuality(solutionQuality);
+            cr.setHorizontalChangeRate(horizontalChangeRate);
+            cr.setVerticalChangeRate(verticalChangeRate);
+            cr.setWindowStability(windowStability);
+            return cr;
         }
 
-        // L0 小波去噪（新增预处理层）
+        // L0 小波去噪（预处理）
         if (config.waveletEnabled) {
             waveletDenoiser.pushToBuffer(state, result.getdNorth(), result.getdEast(), result.getdUp());
             WaveletDenoiser.DenoisedResult denoised = waveletDenoiser.denoise(state);
@@ -268,23 +334,63 @@ public class DisplacementCleaner {
                 result.setDenoisedUp(denoised.up);
             }
         }
+
+        // ========== L2 跳变检测 ==========
         CleanResult r2 = layer2JumpDetection(result, state);
+        LayerResult lr2 = LayerResult.builder(2)
+                .passed(r2.isPassed())
+                .values(result.getdNorth(), result.getdEast(), result.getdUp())
+                .reason(r2.isPassed() ? null : r2.getFailureReason())
+                .stepFlag(r2.isPassed() ? 0.0 : 1.0)
+                .build();
+        layerResults.add(lr2);
         if (!r2.isPassed()) {
             stepFlag = 1.0;
         }
 
-
-        // L2 CUSUM 漂移检测（追加）
+        // L2 CUSUM 漂移检测
         if (config.cusumEnabled) {
             cusumDetector.detect(state, result.getdNorth(), result.getdEast(), result.getdUp(),
                     state.getNorthWindow(), state.getEastWindow(), state.getUpWindow());
         }
+
+        // ========== L3 统计粗差 ==========
         CleanResult r3 = layer3StatisticalOutlier(result, state);
+        LayerResult lr3 = LayerResult.builder(3)
+                .passed(r3.isPassed())
+                .values(result.getdNorth(), result.getdEast(), result.getdUp())
+                .reason(r3.isPassed() ? null : r3.getFailureReason())
+                .build();
+        layerResults.add(lr3);
+
+        // ========== L4 值替换（L3 触发） ==========
+        LayerResult lr4;
         if (!r3.isPassed()) {
-            layer4AnomalyReplacement(result, state, r3);
+            lr4 = layer4AnomalyReplacement(result, state, r3);
+            layerResults.add(lr4);
+            if (lr4.isReplaced()) {
+                result.setdNorth(lr4.getValueN());
+                result.setdEast(lr4.getValueE());
+                result.setdUp(lr4.getValueU());
+                replacementSummary = "L4:" + lr4.getReplacementMethod().name();
+            }
+        } else {
+            lr4 = LayerResult.builder(4)
+                    .passed(true)
+                    .values(result.getdNorth(), result.getdEast(), result.getdUp())
+                    .build();
+            layerResults.add(lr4);
         }
 
+        // ========== L5 基线记忆 ==========
         CleanResult r5 = layer5BaselineMemory(result, state);
+        LayerResult lr5 = LayerResult.builder(5)
+                .passed(r5.isPassed())
+                .values(result.getdNorth(), result.getdEast(), result.getdUp())
+                .reason(r5.isPassed() ? null : r5.getFailureReason())
+                .stepFlag(r5.isPassed() ? 0.0 : 1.0)
+                .build();
+        layerResults.add(lr5);
         if (!r5.isPassed()) {
             stepFlag = 1.0;
         }
@@ -301,6 +407,8 @@ public class DisplacementCleaner {
         } else {
             finalResult = CleanResult.pass(result);
         }
+        finalResult.setLayerResults(layerResults);
+        finalResult.setReplacementSummary(replacementSummary);
         finalResult.setTimeSeriesResidual(timeSeriesResidual);
         finalResult.setSolutionQuality(solutionQuality);
         finalResult.setStepFlag(stepFlag);
@@ -341,99 +449,92 @@ public class DisplacementCleaner {
      * @param result 位移结果
      * @return 清洗结果
      */
-    private CleanResult layer1QualityGate(DisplacementResult result, DeviceState state) {
+    private LayerResult layer1QualityGate(DisplacementResult result, DeviceState state) {
         SolutionStatus status = result.getStatus();
+        double n = result.getdNorth(), e = result.getdEast(), u = result.getdUp();
 
         if (status == SolutionStatus.INVALID || status == SolutionStatus.SINGLE) {
-            result.setAbnormal(true);
-            result.setAbnormalReason("Layer1: invalid/single solution");
             result.setStatus(SolutionStatus.INVALID);
-            return CleanResult.fail(result, 1, "Invalid or single solution");
+            return buildL1Fail(result, state, n, e, u, "Invalid or single solution");
         }
-
 
         if (status == SolutionStatus.FLOAT) {
             result.setDowngraded(true);
-            
+
             if (config.maxDisplacementFloat > 0 && state.isLastValidInitialized()) {
-                double absN = Math.abs(result.getdNorth());
-                double absE = Math.abs(result.getdEast());
-                double absU = Math.abs(result.getdUp());
+                double absN = Math.abs(n), absE = Math.abs(e), absU = Math.abs(u);
                 if (absN > config.maxDisplacementFloat || absE > config.maxDisplacementFloat || absU > config.maxDisplacementFloat) {
-                    result.setAbnormal(true);
-                    result.setAbnormalReason(String.format("Layer1: FLOAT displacement exceeds max (%.4f/%.4f/%.4f > %.4f)",
-                            absN, absE, absU, config.maxDisplacementFloat));
-                    return CleanResult.fail(result, 1, "FLOAT displacement exceeds maximum threshold");
+                    return buildL1Fail(result, state, n, e, u,
+                            String.format("FLOAT displacement exceeds max (%.4f/%.4f/%.4f > %.4f)", absN, absE, absU, config.maxDisplacementFloat));
                 }
             }
-            
+
             if (result.getNumSatellites() < config.minSatellites) {
-                result.setAbnormal(true);
-                result.setAbnormalReason("Layer1: FLOAT with < " + config.minSatellites + " satellites");
-                return CleanResult.fail(result, 1, "FLOAT with insufficient satellites");
+                return buildL1Fail(result, state, n, e, u, "FLOAT with insufficient satellites");
             }
             if (result.getPdop() > config.maxPdopFloat) {
-                result.setAbnormal(true);
-                result.setAbnormalReason("Layer1: FLOAT PDOP > " + config.maxPdopFloat);
-                return CleanResult.fail(result, 1, "FLOAT PDOP too high");
+                return buildL1Fail(result, state, n, e, u, "FLOAT PDOP too high");
             }
-            double effectiveRms = config.useRms3d && result.getRms3d() > 0
-                    ? result.getRms3d() : result.getRms();
-            double effectiveThreshold = config.useRms3d && result.getRms3d() > 0
-                    ? config.maxRms3dFloat : config.maxRmsFloat;
+            double effectiveRms = config.useRms3d && result.getRms3d() > 0 ? result.getRms3d() : result.getRms();
+            double effectiveThreshold = config.useRms3d && result.getRms3d() > 0 ? config.maxRms3dFloat : config.maxRmsFloat;
             if (effectiveRms > effectiveThreshold) {
-                result.setAbnormal(true);
-                result.setAbnormalReason(String.format("Layer1: FLOAT RMS(%.4f) > %.4f", effectiveRms, effectiveThreshold));
-                return CleanResult.fail(result, 1, "FLOAT RMS too high");
+                return buildL1Fail(result, state, n, e, u, String.format("FLOAT RMS(%.4f) > %.4f", effectiveRms, effectiveThreshold));
             }
             if (result.getRatio() > 0 && result.getRatio() < config.minRatioFloat) {
-                result.setAbnormal(true);
-                result.setAbnormalReason("Layer1: FLOAT ratio < " + config.minRatioFloat);
-                return CleanResult.fail(result, 1, "FLOAT ratio too low");
+                return buildL1Fail(result, state, n, e, u, "FLOAT ratio too low");
             }
         }
 
         if (status == SolutionStatus.FIX) {
-            
             if (config.maxDisplacementFix > 0 && state.isLastValidInitialized()) {
-                double absN = Math.abs(result.getdNorth());
-                double absE = Math.abs(result.getdEast());
-                double absU = Math.abs(result.getdUp());
+                double absN = Math.abs(n), absE = Math.abs(e), absU = Math.abs(u);
                 if (absN > config.maxDisplacementFix || absE > config.maxDisplacementFix || absU > config.maxDisplacementFix) {
-                    result.setAbnormal(true);
-                    result.setAbnormalReason(String.format("Layer1: FIX displacement exceeds max (%.4f/%.4f/%.4f > %.4f)",
-                            absN, absE, absU, config.maxDisplacementFix));
-                    return CleanResult.fail(result, 1, "FIX displacement exceeds maximum threshold");
+                    return buildL1Fail(result, state, n, e, u,
+                            String.format("FIX displacement exceeds max (%.4f/%.4f/%.4f > %.4f)", absN, absE, absU, config.maxDisplacementFix));
                 }
             }
-            
+
             if (result.getNumSatellites() < config.minSatellites) {
-                result.setAbnormal(true);
-                result.setAbnormalReason("Layer1: FIX with < " + config.minSatellites + " satellites");
-                return CleanResult.fail(result, 1, "FIX with insufficient satellites");
+                return buildL1Fail(result, state, n, e, u, "FIX with insufficient satellites");
             }
             if (result.getPdop() > config.maxPdop) {
-                result.setAbnormal(true);
-                result.setAbnormalReason("Layer1: FIX PDOP > " + config.maxPdop);
-                return CleanResult.fail(result, 1, "FIX PDOP too high");
+                return buildL1Fail(result, state, n, e, u, "FIX PDOP too high");
             }
-            double effectiveRmsFix = config.useRms3d && result.getRms3d() > 0
-                    ? result.getRms3d() : result.getRms();
-            double effectiveThresholdFix = config.useRms3d && result.getRms3d() > 0
-                    ? config.maxRms3d : config.maxRms;
+            double effectiveRmsFix = config.useRms3d && result.getRms3d() > 0 ? result.getRms3d() : result.getRms();
+            double effectiveThresholdFix = config.useRms3d && result.getRms3d() > 0 ? config.maxRms3d : config.maxRms;
             if (effectiveRmsFix > effectiveThresholdFix) {
-                result.setAbnormal(true);
-                result.setAbnormalReason(String.format("Layer1: FIX RMS(%.4f) > %.4f", effectiveRmsFix, effectiveThresholdFix));
-                return CleanResult.fail(result, 1, "FIX RMS too high");
+                return buildL1Fail(result, state, n, e, u, String.format("FIX RMS(%.4f) > %.4f", effectiveRmsFix, effectiveThresholdFix));
             }
             if (result.getRatio() < config.minRatio) {
-                result.setAbnormal(true);
-                result.setAbnormalReason("Layer1: ratio < " + config.minRatio);
-                return CleanResult.fail(result, 1, "Ratio too low");
+                return buildL1Fail(result, state, n, e, u, "Ratio too low");
             }
         }
 
-        return CleanResult.pass(result);
+        return LayerResult.builder(1)
+                .passed(true)
+                .values(n, e, u)
+                .build();
+    }
+
+    private LayerResult buildL1Fail(DisplacementResult result, DeviceState state,
+                                     double origN, double origE, double origU, String reason) {
+        result.setAbnormal(true);
+        result.setAbnormalReason("Layer1: " + reason);
+
+        if (state.isLastValidInitialized()) {
+            return LayerResult.builder(1)
+                    .passed(false)
+                    .values(state.getLastValidNorth(), state.getLastValidEast(), state.getLastValidUp())
+                    .replacementMethod(LayerResult.ReplacementMethod.LAST_VALID)
+                    .reason(reason)
+                    .build();
+        }
+
+        return LayerResult.builder(1)
+                .passed(false)
+                .values(origN, origE, origU)
+                .reason(reason)
+                .build();
     }
 
     // ==================== 第二层：相邻跳变检测 ====================
@@ -813,11 +914,14 @@ public class DisplacementCleaner {
      * @param r3     第3层清洗结果
      */
     
-                private void layer4AnomalyReplacement(DisplacementResult result, DeviceState state, CleanResult r3) {
+                private LayerResult layer4AnomalyReplacement(DisplacementResult result, DeviceState state, CleanResult r3) {
         if (r3.isPassed()) {
             state.setConsecutiveOutlierCount(0);
             state.setConsecutiveOutlierStart(-1);
-            return;
+            return LayerResult.builder(4)
+                    .passed(true)
+                    .values(result.getdNorth(), result.getdEast(), result.getdUp())
+                    .build();
         }
 
         int count = state.getConsecutiveOutlierCount() + 1;
@@ -830,36 +934,64 @@ public class DisplacementCleaner {
             result.setAbnormal(true);
             result.setAbnormalReason("Layer4: invalid data segment (" + count + " consecutive outliers)");
             state.setConsecutiveOutlierCount(0);
-            return;
+            return LayerResult.builder(4)
+                    .passed(false)
+                    .values(result.getdNorth(), result.getdEast(), result.getdUp())
+                    .reason("Invalid data segment (" + count + " consecutive outliers)")
+                    .build();
         }
 
         if (count >= config.consecutiveOutlierThreshold) {
-            result.setdNorth(state.getLastValidNorth());
-            result.setdEast(state.getLastValidEast());
-            result.setdUp(state.getLastValidUp());
+            double rn = state.getLastValidNorth(), re = state.getLastValidEast(), ru = state.getLastValidUp();
+            result.setdNorth(rn);
+            result.setdEast(re);
+            result.setdUp(ru);
             result.setAbnormal(false);
             result.setAbnormalReason("Layer4: segmented replacement (consecutive " + count + ")");
             state.setConsecutiveOutlierCount(count);
-            return;
+            return LayerResult.builder(4)
+                    .passed(true)
+                    .values(rn, re, ru)
+                    .replacementMethod(LayerResult.ReplacementMethod.LAST_VALID)
+                    .reason("Segmented replacement (consecutive " + count + ")")
+                    .build();
         }
 
         if (nw.size() >= config.windowSize) {
+            double rn, re, ru;
+            LayerResult.ReplacementMethod method;
             if (config.algorithm == Algorithm.THREE_SIGMA) {
-                result.setdNorth(mean(nw));
-                result.setdEast(mean(ew));
-                result.setdUp(mean(uw));
+                rn = mean(nw); re = mean(ew); ru = mean(uw);
+                method = LayerResult.ReplacementMethod.MEAN;
             } else {
-                result.setdNorth(median(nw));
-                result.setdEast(median(ew));
-                result.setdUp(median(uw));
+                rn = median(nw); re = median(ew); ru = median(uw);
+                method = LayerResult.ReplacementMethod.MEDIAN;
             }
+            result.setdNorth(rn);
+            result.setdEast(re);
+            result.setdUp(ru);
+            result.setAbnormal(false);
+            result.setAbnormalReason("Layer4: replaced outlier");
+            return LayerResult.builder(4)
+                    .passed(true)
+                    .values(rn, re, ru)
+                    .replacementMethod(method)
+                    .reason("Replaced outlier")
+                    .build();
         } else {
-            result.setdNorth(state.getLastValidNorth());
-            result.setdEast(state.getLastValidEast());
-            result.setdUp(state.getLastValidUp());
+            double rn = state.getLastValidNorth(), re = state.getLastValidEast(), ru = state.getLastValidUp();
+            result.setdNorth(rn);
+            result.setdEast(re);
+            result.setdUp(ru);
+            result.setAbnormal(false);
+            result.setAbnormalReason("Layer4: replaced outlier");
+            return LayerResult.builder(4)
+                    .passed(true)
+                    .values(rn, re, ru)
+                    .replacementMethod(LayerResult.ReplacementMethod.LAST_VALID)
+                    .reason("Replaced outlier (window not full)")
+                    .build();
         }
-        result.setAbnormal(false);
-        result.setAbnormalReason("Layer4: replaced outlier");
     }
 
 

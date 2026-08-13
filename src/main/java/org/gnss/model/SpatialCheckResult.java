@@ -61,4 +61,19 @@ public class SpatialCheckResult {
 
     public double getPcaResidual() { return pcaResidual; }
     public void setPcaResidual(double pcaResidual) { this.pcaResidual = pcaResidual; }
+
+    public LayerResult toLayerResult() {
+        if (outlier) {
+            return LayerResult.builder(6)
+                    .passed(false)
+                    .values(replacedN, replacedE, replacedU)
+                    .replacementMethod(LayerResult.ReplacementMethod.MEDIAN)
+                    .reason(outlierReason)
+                    .build();
+        }
+        return LayerResult.builder(6)
+                .passed(true)
+                .values(replacedN, replacedE, replacedU)
+                .build();
+    }
 }

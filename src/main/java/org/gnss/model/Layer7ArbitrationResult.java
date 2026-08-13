@@ -149,4 +149,32 @@ public class Layer7ArbitrationResult {
     public void setReplacementSource(String replacementSource) {
         this.replacementSource = replacementSource;
     }
+
+    public LayerResult toLayerResult() {
+        if (layer7Corrected) {
+            return LayerResult.builder(7)
+                    .passed(true)
+                    .values(result != null ? result.getdNorth() : 0,
+                            result != null ? result.getdEast() : 0,
+                            result != null ? result.getdUp() : 0)
+                    .replacementMethod(LayerResult.ReplacementMethod.MEDIAN)
+                    .reason("L7 corrected: " + replacementSource)
+                    .build();
+        }
+        if (layer7Skipped) {
+            return LayerResult.builder(7)
+                    .passed(true)
+                    .values(result != null ? result.getdNorth() : 0,
+                            result != null ? result.getdEast() : 0,
+                            result != null ? result.getdUp() : 0)
+                    .reason("L7 skipped: " + skipReason)
+                    .build();
+        }
+        return LayerResult.builder(7)
+                .passed(true)
+                .values(result != null ? result.getdNorth() : 0,
+                        result != null ? result.getdEast() : 0,
+                        result != null ? result.getdUp() : 0)
+                .build();
+    }
 }
