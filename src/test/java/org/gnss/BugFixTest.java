@@ -43,6 +43,9 @@ class BugFixTest {
         r.setRms(0.02);
         r.setPdop(2.0);
         r.setNumSatellites(10);
+        r.setSdNorth(0.003);
+        r.setSdEast(0.003);
+        r.setSdUp(0.005);
         r.setTimestamp(Instant.now());
         return r;
     }
@@ -147,6 +150,7 @@ class BugFixTest {
     @DisplayName("BugFix2: 真实零值位移不应被误判为'无历史'")
     void testRealZeroDisplacementNotMisjudged() {
         CleanConfig config = new CleanConfig();
+        config.fixCredibilityCheck = false;
         CacheConfig cacheConfig = new CacheConfig();
         DeviceStateCache cache = new DeviceStateCache(cacheConfig, new PersistenceConfig(), h2);
         DisplacementCleaner cleaner = new DisplacementCleaner(config, cache);
@@ -182,6 +186,7 @@ class BugFixTest {
     @DisplayName("BugFix2: 首历元异常大位移不应被无条件放行")
     void testFirstEpochLargeDisplacementNotUnconditionallyPassed() {
         CleanConfig config = new CleanConfig();
+        config.fixCredibilityCheck = false;
         CacheConfig cacheConfig = new CacheConfig();
         DeviceStateCache cache = new DeviceStateCache(cacheConfig, new PersistenceConfig(), h2);
         DisplacementCleaner cleaner = new DisplacementCleaner(config, cache);
@@ -215,6 +220,7 @@ class BugFixTest {
     @DisplayName("BugFix3: 快慢基线应分别维护N/E/U三方向")
     void testBaselineThreeDimensional() {
         CleanConfig config = new CleanConfig();
+        config.fixCredibilityCheck = false;
         CacheConfig cacheConfig = new CacheConfig();
         DeviceStateCache cache = new DeviceStateCache(cacheConfig, new PersistenceConfig(), h2);
         DisplacementCleaner cleaner = new DisplacementCleaner(config, cache);
@@ -254,6 +260,7 @@ class BugFixTest {
     @DisplayName("BugFix4: HAMPEL算法替换值应使用中位数而非均值")
     void testHampelReplacementUsesMedian() {
         CleanConfig config = new CleanConfig();
+        config.fixCredibilityCheck = false;
         config.algorithm = Algorithm.HAMPEL;
         config.windowSize = 20;
         CacheConfig cacheConfig = new CacheConfig();
@@ -291,6 +298,7 @@ class BugFixTest {
     @DisplayName("BugFix4: THREE_SIGMA算法替换值应使用均值")
     void testThreeSigmaReplacementUsesMean() {
         CleanConfig config = new CleanConfig();
+        config.fixCredibilityCheck = false;
         config.algorithm = Algorithm.THREE_SIGMA;
         config.windowSize = 20;
         CacheConfig cacheConfig = new CacheConfig();
@@ -326,6 +334,7 @@ class BugFixTest {
     @DisplayName("BugFix4: IQR算法替换值应使用中位数")
     void testIQRReplacementUsesMedian() {
         CleanConfig config = new CleanConfig();
+        config.fixCredibilityCheck = false;
         config.algorithm = Algorithm.IQR;
         config.windowSize = 20;
         CacheConfig cacheConfig = new CacheConfig();
@@ -467,6 +476,7 @@ class BugFixTest {
     @DisplayName("BugFix9: FLOAT解应使用3D-RMS进行质量门控")
     void testFloat3dRmsQualityGate() {
         CleanConfig config = new CleanConfig();
+        config.fixCredibilityCheck = false;
         config.useRms3d = true;
         CacheConfig cacheConfig = new CacheConfig();
         PersistenceConfig persistConfig = new PersistenceConfig();
@@ -495,6 +505,7 @@ class BugFixTest {
     @DisplayName("BugFix10: FLOAT解ratio过低应被拒绝")
     void testFloatLowRatioRejected() {
         CleanConfig config = new CleanConfig();
+        config.fixCredibilityCheck = false;
         config.minRatioFloat = 1.5;
         CacheConfig cacheConfig = new CacheConfig();
         PersistenceConfig persistConfig = new PersistenceConfig();
@@ -522,6 +533,7 @@ class BugFixTest {
     @DisplayName("BugFix11: rms3d为0时应回退到单分量rms")
     void testFallbackToSingleRms() {
         CleanConfig config = new CleanConfig();
+        config.fixCredibilityCheck = false;
         config.useRms3d = true;
         CacheConfig cacheConfig = new CacheConfig();
         PersistenceConfig persistConfig = new PersistenceConfig();

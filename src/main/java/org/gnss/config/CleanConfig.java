@@ -41,6 +41,15 @@ public class CleanConfig {
     /** 最大位移阈值-FIX解（米），默认：3.0 */
     public double maxDisplacementFix = 3.0;
 
+    /** 是否启用FIX解可信性验证（位移显著性判断），默认：true */
+    public boolean fixCredibilityCheck = true;
+
+    /** FIX解可信性验证倍数阈值k，|delta| > k * σ_combined 则判定为false fix，默认：5.0 */
+    public double fixCredibilityK = 5.0;
+
+    /** FIX解可信性验证σ最小值（米），防止σ极小时误判，默认：0.001 */
+    public double fixCredibilityMinSigma = 0.001;
+
     /** 是否使用三维RMS替代单分量RMS进行质量门控，默认：true */
     public boolean useRms3d = true;
 

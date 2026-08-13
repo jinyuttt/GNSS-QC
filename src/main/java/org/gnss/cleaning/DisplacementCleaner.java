@@ -508,6 +508,33 @@ public class DisplacementCleaner {
             if (result.getRatio() < config.minRatio) {
                 return buildL1Fail(result, state, n, e, u, "Ratio too low");
             }
+
+            if (config.fixCredibilityCheck && state.isInitialBaselineEstablished()) {
+                double deltaN = n - state.getInitialBaselineNorth();
+                double deltaE = e - state.getInitialBaselineEast();
+                double deltaU = u - state.getInitialBaselineUp();
+                double sdN = Math.max(result.getSdNorth(), config.fixCredibilityMinSigma);
+                double sdE = Math.max(result.getSdEast(), config.fixCredibilityMinSigma);
+                double sdU = Math.max(result.getSdUp(), config.fixCredibilityMinSigma);
+                double sdBaseN = state.getInitialBaselineSdNorth();
+                double sdBaseE = state.getInitialBaselineSdEast();
+                double sdBaseU = state.getInitialBaselineSdUp();
+                double sigmaN = Math.sqrt(sdN * sdN + sdBaseN * sdBaseN);
+                double sigmaE = Math.sqrt(sdE * sdE + sdBaseE * sdBaseE);
+                double sigmaU = Math.sqrt(sdU * sdU + sdBaseU * sdBaseU);
+                double k = config.fixCredibilityK;
+                boolean sigN = Math.abs(deltaN) > k * sigmaN;
+                boolean sigE = Math.abs(deltaE) > k * sigmaE;
+                boolean sigU = Math.abs(deltaU) > k * sigmaU;
+                result.setSignificantNorth(sigN);
+                result.setSignificantEast(sigE);
+                result.setSignificantUp(sigU);
+                if (sigN || sigE || sigU) {
+                    String detail = String.format("FIX false fix suspected: |dN|=%.4f > k*σ=%.4f, |dE|=%.4f > k*σ=%.4f, |dU|=%.4f > k*σ=%.4f (k=%.1f)",
+                            Math.abs(deltaN), k * sigmaN, Math.abs(deltaE), k * sigmaE, Math.abs(deltaU), k * sigmaU, k);
+                    return buildL1Fail(result, state, n, e, u, detail);
+                }
+            }
         }
 
         return LayerResult.builder(1)

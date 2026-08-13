@@ -42,6 +42,9 @@ class CleaningPipelineTest {
         r.setRms(0.020);
         r.setPdop(2.0);
         r.setNumSatellites(10);
+        r.setSdNorth(0.003);
+        r.setSdEast(0.003);
+        r.setSdUp(0.005);
         r.setTimestamp(Instant.now());
         return r;
     }
@@ -170,6 +173,7 @@ class CleaningPipelineTest {
     @DisplayName("Pipeline: cleanSingle - no history (Layer1->3->4->5)")
     void testCleanSinglePipeline() {
         CleanConfig config = new CleanConfig();
+        config.fixCredibilityCheck = false;
         CacheConfig cacheConfig = new CacheConfig();
         DeviceStateCache cache = new DeviceStateCache(cacheConfig, new PersistenceConfig(), h2);
         DisplacementCleaner cleaner = new DisplacementCleaner(config, cache);
@@ -263,6 +267,7 @@ class CleaningPipelineTest {
     @DisplayName("Pipeline: cleanWithHistory - with history (Layer1->2->3->4->5->6)")
     void testCleanWithHistoryPipeline() {
         CleanConfig config = new CleanConfig();
+        config.fixCredibilityCheck = false;
         config.enableSpatialCheck = true;
         config.spatialOutlierThreshold = 0.03;
         config.spatialMinNeighbors = 2;
@@ -532,6 +537,7 @@ class CleaningPipelineTest {
     @DisplayName("Pipeline: Hampel algorithm - detrended residual detection")
     void testHampelAlgorithmPipeline() {
         CleanConfig config = new CleanConfig();
+        config.fixCredibilityCheck = false;
         config.algorithm = Algorithm.HAMPEL;
         config.hampelK = 3.0;
         config.hampelKVertical = 3.5;
@@ -577,6 +583,7 @@ class CleaningPipelineTest {
         printSubHeader("Phase 4: Compare IQR vs Hampel on trend data");
         {
             CleanConfig iqrConfig = new CleanConfig();
+            iqrConfig.fixCredibilityCheck = false;
             iqrConfig.algorithm = Algorithm.IQR;
             DeviceStateCache iqrCache = new DeviceStateCache(cacheConfig, new PersistenceConfig(), h2);
             DisplacementCleaner iqrCleaner = new DisplacementCleaner(iqrConfig, iqrCache);

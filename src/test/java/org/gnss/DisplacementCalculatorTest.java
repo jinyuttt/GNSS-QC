@@ -35,6 +35,7 @@ class DisplacementCalculatorTest {
     void setUp() {
         h2.clearAll();
         CleanConfig cleanConfig = new CleanConfig();
+        cleanConfig.fixCredibilityCheck = false;
         DiagnosisConfig diagnosisConfig = new DiagnosisConfig();
         CacheConfig cacheConfig = new CacheConfig();
         PersistenceConfig persistenceConfig = new PersistenceConfig();
@@ -58,6 +59,9 @@ class DisplacementCalculatorTest {
         r.setRms(0.02);
         r.setPdop(2.0);
         r.setNumSatellites(10);
+        r.setSdNorth(0.003);
+        r.setSdEast(0.003);
+        r.setSdUp(0.005);
         r.setTimestamp(Instant.now());
         return r;
     }
@@ -308,6 +312,52 @@ class DisplacementCalculatorTest {
 
         assertTrue(cr.isPassed(), "Layer4替换后应通过");
         assertTrue(cr.getResult().isCleaned());
+        printH2Summary(deviceId);
+    }
+
+    // ==================== L1 FIX可信性验证 ====================
+
+    @Test
+    @Order(13)
+    @DisplayName("L1 FIX可信性: false fix位移超k*σ被L1拒绝")
+    void testFixCredibilityCheckRejectsFalseFix() {
+        printSeparator("L1 FIX可信性验证: false fix检测");
+        CleanConfig cfg = new CleanConfig();
+        cfg.fixCredibilityCheck = true;
+        cfg.fixCredibilityK = 5.0;
+        cfg.fixCredibilityMinSigma = 0.001;
+        DefaultDisplacementCalculator fixCalc = new DefaultDisplacementCalculator(
+                cfg, new DiagnosisConfig(), new CacheConfig(), new PersistenceConfig(), h2);
+
+        String deviceId = "fix-cred-dev";
+        double baseN = 0.010, baseE = 0.005, baseU = 0.003;
+
+        System.out.println("  --- 建立初始基线 (15条FIX, sd=0.003) ---");
+        for (int i = 0; i < 15; i++) {
+            DisplacementResult r = makeFixResult(
+                    baseN + noise(0.001),
+                    baseE + noise(0.001),
+                    baseU + noise(0.001));
+            CleanResult cr = fixCalc.cleanWithHistory(r, deviceId);
+            printCleanResult(i + 1, cr);
+        }
+
+        System.out.println("  --- 注入false fix (N偏移0.05m, 远超k*σ) ---");
+        DisplacementResult falseFix = makeFixResult(baseN + 0.05, baseE, baseU);
+        CleanResult cr = fixCalc.cleanWithHistory(falseFix, deviceId);
+        printCleanResult(16, cr);
+
+        assertFalse(cr.isPassed(), "false fix应被L1拒绝");
+        assertNotNull(cr.getResult().getAbnormalReason(), "应有异常原因");
+        assertTrue(cr.getResult().getAbnormalReason().contains("false fix"),
+                "异常原因应包含'false fix': " + cr.getResult().getAbnormalReason());
+
+        System.out.println("  --- 正常FIX解应通过 (偏移在k*σ内) ---");
+        DisplacementResult normalFix = makeFixResult(baseN + 0.002, baseE + 0.001, baseU + 0.001);
+        CleanResult cr2 = fixCalc.cleanWithHistory(normalFix, deviceId);
+        printCleanResult(17, cr2);
+        assertTrue(cr2.isPassed(), "正常FIX解应通过FIX可信性检查");
+
         printH2Summary(deviceId);
     }
 

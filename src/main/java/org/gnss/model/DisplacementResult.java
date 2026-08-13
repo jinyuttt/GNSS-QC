@@ -31,6 +31,24 @@ public class DisplacementResult {
     /** 三维RMS（米），RMS3D = sqrt(sdn^2 + sde^2 + sdu^2)，默认：0.0 */
     private double rms3d;
 
+    /** 北向标准差（米），sqrt(qr[0])，默认：0.0 */
+    private double sdNorth;
+
+    /** 东向标准差（米），sqrt(qr[1])，默认：0.0 */
+    private double sdEast;
+
+    /** 天向标准差（米），sqrt(qr[2])，默认：0.0 */
+    private double sdUp;
+
+    /** 北向位移是否显著（FIX可信性验证），默认：false */
+    private boolean significantNorth;
+
+    /** 东向位移是否显著（FIX可信性验证），默认：false */
+    private boolean significantEast;
+
+    /** 天向位移是否显著（FIX可信性验证），默认：false */
+    private boolean significantUp;
+
     /** 位置精度因子PDOP，默认：0.0 */
     private double pdop;
 
@@ -207,4 +225,22 @@ public class DisplacementResult {
 
     public Double getDenoisedUp() { return denoisedUp; }
     public void setDenoisedUp(Double denoisedUp) { this.denoisedUp = denoisedUp; }
+
+    public double getSdNorth() { return sdNorth; }
+    public void setSdNorth(double sdNorth) { this.sdNorth = sdNorth; }
+
+    public double getSdEast() { return sdEast; }
+    public void setSdEast(double sdEast) { this.sdEast = sdEast; }
+
+    public double getSdUp() { return sdUp; }
+    public void setSdUp(double sdUp) { this.sdUp = sdUp; }
+
+    public boolean isSignificantNorth() { return significantNorth; }
+    public void setSignificantNorth(boolean significantNorth) { this.significantNorth = significantNorth; }
+
+    public boolean isSignificantEast() { return significantEast; }
+    public void setSignificantEast(boolean significantEast) { this.significantEast = significantEast; }
+
+    public boolean isSignificantUp() { return significantUp; }
+    public void setSignificantUp(boolean significantUp) { this.significantUp = significantUp; }
 }

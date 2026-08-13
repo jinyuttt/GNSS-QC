@@ -377,6 +377,35 @@ CUSUM- = max(0, CUSUM-_prev - (x - median) - K×MAD)
 
 ---
 
+### ✅ L1 FIX可信性验证 —— 识别false fix，拒绝不可信FIX解
+
+**实现方式**：在L1质量门禁中，对FIX解附加位移显著性检查
+
+**核心价值**：
+- 检测FIX解位移远超自身声称精度的异常情况（false fix）
+- 防止模糊度错误固定的FIX解污染后续清洗流程
+- 使用初始基线（L5前10个FIX解均值）作为参考，而非lastValid，避免漂移累积
+
+**检测原理**：
+```
+仅当 FIX解 + initBaseline已初始化 时执行：
+  deltaN = N - baselineN
+  σ_combined = sqrt(σ_current² + σ_baseline²)
+  如果 |deltaN| > k * σ_combined → FIX不可信
+  k 默认5.0（3σ太紧，false fix位移通常>>10mm）
+  任一分量不可信 → 拒绝，用lastValid替换
+  LayerResult记录原因："FIX false fix suspected: |dN|=XX > k*σ=YY"
+```
+
+**配置参数**：
+- fixCredibilityCheck — 启用/禁用FIX可信性验证（默认true）
+- fixCredibilityK — 倍数阈值k（默认5.0）
+- fixCredibilityMinSigma — σ最小值（默认0.001m，防止σ极小时误判）
+
+**初始基线建立**：DeviceState.accumulateInitialBaseline() 收集前10个FIX解，计算均值和标准差作为初始基线。初始基线标准差参与σ_combined计算，确保基线不确定性被纳入考量。
+
+---
+
 ### ✅ L1 位移阈值门控 —— FIX/FLOAT 解位移超限直接拒绝
 
 **实现方式**：在 L1 质量门禁中新增位移绝对值检查，FIX 和 FLOAT 解分别配置阈值
@@ -404,6 +433,7 @@ FIX解：  |N| > 3.0 或 |E| > 3.0 或 |U| > 3.0 → 拒绝，用 lastValid 替�
 | 能力 | 增强前 | 增强后 |
 |------|--------|--------|
 | 位移门控 | 无 | L1 FIX/FLOAT位移阈值门控 |
+| FIX可信性 | 无 | L1 FIX解false fix检测（位移显著性验证） |
 | 噪声处理 | 仅统计滤波 | 小波时频分析 |
 | 漂移检测 | 无 | CUSUM累积和 |
 | 空间校验 | 中位数方法 | PCA主成分分析 |
@@ -589,6 +619,9 @@ CUSUM- = max(0, CUSUM-_prev - (x - median) - K×MAD)
 | minSatellites | 5 | 最小卫星数 |
 | maxDisplacementFloat | 1.0 | FLOAT解最大位移阈值（m），N/E/U任一分量超限直接拒绝 |
 | maxDisplacementFix | 3.0 | FIX解最大位移阈值（m），N/E/U任一分量超限直接拒绝 |
+| fixCredibilityCheck | true | FIX解可信性验证开关（位移显著性判断） |
+| fixCredibilityK | 5.0 | FIX可信性验证倍数阈值k，|delta| > k*σ_combined 判定为false fix |
+| fixCredibilityMinSigma | 0.001 | FIX可信性验证σ最小值（m），防止σ极小时误判 |
 | enableSpatialCheck | true | 空间校验开关 |
 
 ### Layer7Config — L7/L7s/L8配置

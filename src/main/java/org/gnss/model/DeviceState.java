@@ -124,6 +124,24 @@ public class DeviceState {
     /** 初始基线天向累计值（米），默认：0.0 */
     private double initialBaselineUpSum;
 
+    /** 初始基线北向累计平方值（米²），默认：0.0 */
+    private double initialBaselineNorthSumSq;
+
+    /** 初始基线东向累计平方值（米²），默认：0.0 */
+    private double initialBaselineEastSumSq;
+
+    /** 初始基线天向累计平方值（米²），默认：0.0 */
+    private double initialBaselineUpSumSq;
+
+    /** 初始基线北向标准差（米），默认：0.0 */
+    private double initialBaselineSdNorth;
+
+    /** 初始基线东向标准差（米），默认：0.0 */
+    private double initialBaselineSdEast;
+
+    /** 初始基线天向标准差（米），默认：0.0 */
+    private double initialBaselineSdUp;
+
     /** 跳变方向历史记录（最近N个历元），默认：空 */
     private final LinkedList<DirectionRecord> jumpDirectionHistory = new LinkedList<>();
 
@@ -285,6 +303,9 @@ public class DeviceState {
     public double getInitialBaselineNorth() { return initialBaselineNorth; }
     public double getInitialBaselineEast() { return initialBaselineEast; }
     public double getInitialBaselineUp() { return initialBaselineUp; }
+    public double getInitialBaselineSdNorth() { return initialBaselineSdNorth; }
+    public double getInitialBaselineSdEast() { return initialBaselineSdEast; }
+    public double getInitialBaselineSdUp() { return initialBaselineSdUp; }
     public boolean isInitialBaselineEstablished() { return initialBaselineEstablished; }
 
     public void accumulateInitialBaseline(double north, double east, double up) {
@@ -292,11 +313,18 @@ public class DeviceState {
         initialBaselineNorthSum += north;
         initialBaselineEastSum += east;
         initialBaselineUpSum += up;
+        initialBaselineNorthSumSq += north * north;
+        initialBaselineEastSumSq += east * east;
+        initialBaselineUpSumSq += up * up;
         initialBaselineFixCount++;
         if (initialBaselineFixCount >= 10) {
-            initialBaselineNorth = initialBaselineNorthSum / initialBaselineFixCount;
-            initialBaselineEast = initialBaselineEastSum / initialBaselineFixCount;
-            initialBaselineUp = initialBaselineUpSum / initialBaselineFixCount;
+            double n = initialBaselineFixCount;
+            initialBaselineNorth = initialBaselineNorthSum / n;
+            initialBaselineEast = initialBaselineEastSum / n;
+            initialBaselineUp = initialBaselineUpSum / n;
+            initialBaselineSdNorth = Math.sqrt(Math.max(0, initialBaselineNorthSumSq / n - initialBaselineNorth * initialBaselineNorth));
+            initialBaselineSdEast = Math.sqrt(Math.max(0, initialBaselineEastSumSq / n - initialBaselineEast * initialBaselineEast));
+            initialBaselineSdUp = Math.sqrt(Math.max(0, initialBaselineUpSumSq / n - initialBaselineUp * initialBaselineUp));
             initialBaselineEstablished = true;
         }
     }
