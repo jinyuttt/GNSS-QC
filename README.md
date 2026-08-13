@@ -1,4 +1,5 @@
-﻿# GNSS-QC - GNSS变形监测数据质量控制引擎
+﻿
+# GNSS-QC - GNSS变形监测数据质量控制引擎
 
 ## 概述
 
@@ -11,7 +12,7 @@ GNSS-QC 是一个用于 GNSS 变形监测数据质量控制的七层递进式清
 | 层级 | 名称 | 功能 | 状态 |
 |------|------|------|------|
 | **L0** | 小波去噪 | 使用 Daubechies 4 小波 + 软阈值去噪预处理 | 新增 |
-| **L1** | 质量门禁 | 基于解类型、Ratio、RMS、PDOP、卫星数的质量筛选 | 保持 |
+| **L1** | 质量门禁 | 基于解类型、Ratio、RMS、PDOP、卫星数的质量筛选 + 位移阈值门控（FIX/FLOAT分别配置） | 增强 |
 | **L2** | 跳变检测 | Hampel 滤波器检测突变 + CUSUM 累积和检测缓慢漂移 | 增强 |
 | **L3** | 统计粗差 | Hampel/IQR/3σ 基础检测 + 小波残差双模检测 | 增强 |
 | **L4** | 值替换 | 单点中位数替换 + 连续粗差分段替换 + 无效数据段标记 | 升级 |
@@ -376,10 +377,33 @@ CUSUM- = max(0, CUSUM-_prev - (x - median) - K×MAD)
 
 ---
 
+### ✅ L1 位移阈值门控 —— FIX/FLOAT 解位移超限直接拒绝
+
+**实现方式**：在 L1 质量门禁中新增位移绝对值检查，FIX 和 FLOAT 解分别配置阈值
+
+**核心价值**：
+- FIX 解位移任一分量（N/E/U）绝对值超过 `maxDisplacementFix`（默认3.0m）直接拒绝
+- FLOAT 解位移任一分量绝对值超过 `maxDisplacementFloat`（默认1.0m）直接拒绝
+- 阈值设为0时禁用该检查
+- 需要缓存中有 lastValid 值才启用（`state.isLastValidInitialized()`）
+
+**判定逻辑**：
+```
+FLOAT解：|N| > 1.0 或 |E| > 1.0 或 |U| > 1.0 → 拒绝，用 lastValid 替换
+FIX解：  |N| > 3.0 或 |E| > 3.0 或 |U| > 3.0 → 拒绝，用 lastValid 替换
+```
+
+**配置参数**：
+- maxDisplacementFloat — FLOAT解最大位移阈值（默认1.0m）
+- maxDisplacementFix — FIX解最大位移阈值（默认3.0m）
+
+---
+
 ## 增强效果对比
 
 | 能力 | 增强前 | 增强后 |
 |------|--------|--------|
+| 位移门控 | 无 | L1 FIX/FLOAT位移阈值门控 |
 | 噪声处理 | 仅统计滤波 | 小波时频分析 |
 | 漂移检测 | 无 | CUSUM累积和 |
 | 空间校验 | 中位数方法 | PCA主成分分析 |
@@ -554,11 +578,17 @@ CUSUM- = max(0, CUSUM-_prev - (x - median) - K×MAD)
 | // 质量门控 | | |
 | enableRatioCheck | true | Ratio检查开关 |
 | ratioThreshold | 3.0 | Ratio阈值 |
+| minRatio | 3.0 | 最小Ratio（FIX解） |
+| minRatioFloat | 1.5 | 最小Ratio（FLOAT解，低于此值视为模糊度未收敛） |
 | enableRmsCheck | true | RMS检查开关 |
 | rmsThreshold | 0.05 | RMS阈值（m） |
+| maxRms3d | 0.08 | 三维RMS阈值（m） |
+| useRms3d | true | 是否使用三维RMS替代单分量RMS |
 | enablePdopCheck | true | PDOP检查开关 |
 | pdopThreshold | 6.0 | PDOP阈值 |
 | minSatellites | 5 | 最小卫星数 |
+| maxDisplacementFloat | 1.0 | FLOAT解最大位移阈值（m），N/E/U任一分量超限直接拒绝 |
+| maxDisplacementFix | 3.0 | FIX解最大位移阈值（m），N/E/U任一分量超限直接拒绝 |
 | enableSpatialCheck | true | 空间校验开关 |
 
 ### Layer7Config — L7/L7s/L8配置
